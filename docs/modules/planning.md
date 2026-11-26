@@ -1,28 +1,28 @@
-# 前期策划模块 — 用户手册
+# Modul Vorausplanung — Benutzerhandbuch
 
-> 最后更新: 2026-11-03（结构化特性专项；其他模块未重新验收）| 适用版本: OpenQMS v1.0
+> Zuletzt aktualisiert: 2026-11-03 (Schwerpunkt strukturierte Merkmale; andere Module nicht erneut abgenommen) | Gilt für: OpenQMS v1.0
 
 ---
 
-## 1. 功能概述
+## 1. Funktionsüberblick
 
-前期策划模块覆盖 IATF 16949 产品质量先期策划（APQP）全流程，从风险识别（FMEA）到控制计划、PPAP 提交，再到特殊特性管理，形成完整的产品质量策划闭环：
+Das Modul Vorausplanung deckt die gesamte Produktqualitätsvorausplanung (APQP) nach IATF 16949 ab – von der Risikoerkennung (FMEA) über Produktionslenkungsplan und PPAP-Einreichung bis zur Verwaltung besonderer Merkmale – und bildet so einen geschlossenen Planungskreislauf:
 
-| 子模块 | 路由 | ModuleKey | 功能范围 |
+| Teilmodul | Route | ModuleKey | Funktionsumfang |
 |--------|------|-----------|----------|
-| FMEA | `/fmea`, `/fmea/:id`, `/fmea/pfmea-wizard/:id` | fmea | DFMEA/PFMEA 新建、编辑、审批、归档；PFMEA 七步法生成向导 |
-| 控制计划 | `/control-plans`, `/control-plans/:id` | planning | 从 PFMEA 导入、编辑、审批、版本管理 |
-| APQP | `/apqp`, `/apqp/:id` | planning | 5 阶段门径管理、交付物关联 |
-| PPAP | `/ppap`, `/ppap/:id` | ppap | 18 要素提交、审批、驳回、重新提交 |
-| 特殊特性 | `/special-characteristics`, `/special-characteristics/matrix`, `/special-characteristics/traceability`, `/special-characteristics/:id` | special_characteristic | CC/SC 识别、覆盖率矩阵、追溯性视图、FMEA→CP 联动 |
+| FMEA | `/fmea`, `/fmea/:id`, `/fmea/pfmea-wizard/:id` | fmea | DFMEA/PFMEA anlegen, bearbeiten, freigeben, archivieren; PFMEA-Assistent nach 7 Schritten |
+| Produktionslenkungsplan | `/control-plans`, `/control-plans/:id` | planning | Import aus PFMEA, Bearbeitung, Freigabe, Versionsverwaltung |
+| APQP | `/apqp`, `/apqp/:id` | planning | Gate-Verwaltung in 5 Phasen, Verknüpfung von Ergebnissen |
+| PPAP | `/ppap`, `/ppap/:id` | ppap | Einreichung, Freigabe, Zurückweisung und erneute Einreichung der 18 Elemente |
+| Besondere Merkmale | `/special-characteristics`, `/special-characteristics/matrix`, `/special-characteristics/traceability`, `/special-characteristics/:id` | special_characteristic | CC/SC-Erkennung, Abdeckungsmatrix, Rückverfolgungsansicht, Kopplung FMEA→CP |
 
-五个子模块通过数据关联实现端到端追溯：FMEA 失效模式识别出特殊特性（CC/SC），控制计划从 PFMEA 导入过程步骤和特性，APQP 项目关联 FMEA、控制计划、PPAP 作为交付物，特殊特性矩阵展示 FMEA→控制计划→MSA 的完整覆盖。
+Die fünf Teilmodule sind über Datenverknüpfungen durchgängig rückverfolgbar: FMEA-Fehlerarten identifizieren besondere Merkmale (CC/SC), der Produktionslenkungsplan importiert Prozessschritte und Merkmale aus der PFMEA, APQP-Projekte verknüpfen FMEA, Produktionslenkungsplan und PPAP als Ergebnisse, und die Matrix besonderer Merkmale zeigt die vollständige Abdeckung FMEA→Produktionslenkungsplan→MSA.
 
 ---
 
-## 2. 适用角色与权限
+## 2. Rollen und Berechtigungen
 
-权限模型采用 **ModuleKey × PermissionLevel × 角色** 三级结构。PermissionLevel 含义：0 = NONE（不可见）、1 = VIEW（只读）、2 = CREATE（可新建）、3 = EDIT（可编辑）、4 = APPROVE（可审批/关闭）、5 = ADMIN（完全控制）。
+Das Berechtigungsmodell ist dreistufig: **ModuleKey × PermissionLevel × Rolle**. Bedeutung von PermissionLevel: 0 = NONE (unsichtbar), 1 = VIEW (nur lesen), 2 = CREATE (anlegen), 3 = EDIT (bearbeiten), 4 = APPROVE (freigeben/abschließen), 5 = ADMIN (Vollzugriff).
 
 | ModuleKey | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
 |-----------|:-----:|:-------:|:--------:|:-----------:|:-----------:|:-----------:|:------:|
@@ -31,117 +31,117 @@
 | ppap | 5 | 4 | 0 | 3 | 3 | 0 | 1 |
 | special_characteristic | 5 | 4 | 0 | 3 | 0 | 0 | 1 |
 
-**关键操作与最低权限对照：**
+**Wichtige Operationen und Mindestberechtigung:**
 
-| 操作 | 模块 | 所需 PermissionLevel |
+| Operation | Modul | Erforderliche PermissionLevel |
 |------|------|----------------------|
-| 查看 FMEA/CP/APQP 列表与详情 | fmea / planning | VIEW (1) |
-| 新建 FMEA | fmea | CREATE (2) |
-| 编辑 FMEA 图谱 | fmea | EDIT (3) |
-| 审批/归档 FMEA | fmea | APPROVE (4) |
-| 新建/编辑控制计划 | planning | CREATE (2) / EDIT (3) |
-| 审批控制计划 | planning | APPROVE (4) |
-| 创建 APQP 项目、提交阶段门径 | planning | CREATE (2) |
-| 审批/驳回 APQP 门径 | planning | APPROVE (4) |
-| 取消 APQP 项目 | planning | ADMIN (5) |
-| 查看 PPAP 提交 | ppap | VIEW (1) |
-| 创建/编辑 PPAP 提交 | ppap | CREATE (2) / EDIT (3) |
-| 审批/驳回 PPAP | ppap | APPROVE (4) |
-| 查看特殊特性 | special_characteristic | VIEW (1) |
-| 创建/编辑特殊特性 | special_characteristic | EDIT (3) |
-| 安全特性审批 | special_characteristic | APPROVE (4) |
+| FMEA/CP/APQP-Listen und -Details ansehen | fmea / planning | VIEW (1) |
+| FMEA anlegen | fmea | CREATE (2) |
+| FMEA-Graph bearbeiten | fmea | EDIT (3) |
+| FMEA freigeben/archivieren | fmea | APPROVE (4) |
+| Produktionslenkungsplan anlegen/bearbeiten | planning | CREATE (2) / EDIT (3) |
+| Produktionslenkungsplan freigeben | planning | APPROVE (4) |
+| APQP-Projekt anlegen, Gate einreichen | planning | CREATE (2) |
+| APQP-Gate freigeben/zurückweisen | planning | APPROVE (4) |
+| APQP-Projekt abbrechen | planning | ADMIN (5) |
+| PPAP-Einreichungen ansehen | ppap | VIEW (1) |
+| PPAP-Einreichung anlegen/bearbeiten | ppap | CREATE (2) / EDIT (3) |
+| PPAP freigeben/zurückweisen | ppap | APPROVE (4) |
+| Besondere Merkmale ansehen | special_characteristic | VIEW (1) |
+| Besondere Merkmale anlegen/bearbeiten | special_characteristic | EDIT (3) |
+| Freigabe von Sicherheitsmerkmalen | special_characteristic | APPROVE (4) |
 
 ---
 
 ## 3. FMEA
 
-### 3.1 核心概念
+### 3.1 Grundbegriffe
 
-OpenQMS 采用 AIAG-VDA FMEA 第一版（2019 版）方法论，支持 **DFMEA** 和 **PFMEA** 两种类型，使用图模型（Graph Model）存储失效分析数据。
+OpenQMS folgt der Methodik des AIAG-VDA-FMEA-Handbuchs (1. Ausgabe, 2019), unterstützt die Typen **DFMEA** und **PFMEA** und speichert die Fehleranalysedaten in einem Graphmodell (Graph Model).
 
-#### 3.1.1 AIAG-VDA 七步法
+#### 3.1.1 Die 7 Schritte nach AIAG-VDA
 
-| 步骤 | 名称 | 说明 |
+| Schritt | Name | Beschreibung |
 |:----:|------|------|
-| 1 | 范围定义 (Scope) | 定义分析范围、边界和职责 |
-| 2 | 结构分析 (Structure Analysis) | 建立系统结构树 / 过程流程 |
-| 3 | 功能分析 (Function Analysis) | 为每个结构元素定义功能 |
-| 4 | 失效分析 (Failure Analysis) | 识别失效模式、失效影响和失效原因 |
-| 5 | 风险分析 (Risk Analysis) | 评估严重度 S、频度 O、探测度 D |
-| 6 | 优化 (Optimization) | 制定预防措施和探测措施 |
-| 7 | 结果文档化 (Results Documentation) | 记录结论和改进措施 |
+| 1 | Umfang (Scope) | Analyseumfang, Grenzen und Verantwortlichkeiten festlegen |
+| 2 | Strukturanalyse (Structure Analysis) | Systemstrukturbaum / Prozessablauf aufbauen |
+| 3 | Funktionsanalyse (Function Analysis) | Funktionen je Strukturelement festlegen |
+| 4 | Fehleranalyse (Failure Analysis) | Fehlerarten, Fehlerfolgen und Fehlerursachen ermitteln |
+| 5 | Risikoanalyse (Risk Analysis) | Bedeutung S, Auftreten O und Entdeckung D bewerten |
+| 6 | Optimierung (Optimization) | Vermeidungs- und Entdeckungsmaßnahmen festlegen |
+| 7 | Dokumentation der Ergebnisse (Results Documentation) | Schlussfolgerungen und Verbesserungsmaßnahmen festhalten |
 
-#### 3.1.2 图模型 (Graph Model)
+#### 3.1.2 Graphmodell (Graph Model)
 
-FMEA 数据以 JSONB 图结构存储在 `graph_data` 字段中，格式为 `{ nodes: [...], edges: [...] }`。
+FMEA-Daten werden als JSONB-Graph im Feld `graph_data` gespeichert, im Format `{ nodes: [...], edges: [...] }`.
 
-**DFMEA 节点链：**
+**DFMEA-Knotenkette:**
 ```
 System → Subsystem → Component → Function → FailureMode → FailureEffect / FailureCause → Controls
 ```
 
-**PFMEA 节点链：**
+**PFMEA-Knotenkette:**
 ```
 ProcessItem → ProcessStep → ProcessWorkElement → ProcessStepFunction / ProcessWorkElementFunction → FailureMode → FailureEffect / FailureCause → Controls
 ```
 
-**边类型：**
+**Kantentypen:**
 
-| 边类型 | 含义 |
+| Kantentyp | Bedeutung |
 |--------|------|
-| `HAS_PROCESS_STEP` | 过程步骤归属 |
-| `FUNCTION_MAPPED_TO` | 功能映射 |
-| `HAS_FAILURE_MODE` | 失效模式关联 |
-| `EFFECT_OF` | 失效影响 |
-| `CAUSE_OF` | 失效原因 |
-| `PREVENTED_BY` | 预防措施 |
-| `DETECTED_BY` | 探测措施 |
-| `OPTIMIZED_BY` | 优化措施 |
+| `HAS_PROCESS_STEP` | Zugehörigkeit des Prozessschritts |
+| `FUNCTION_MAPPED_TO` | Funktionszuordnung |
+| `HAS_FAILURE_MODE` | Verknüpfung der Fehlerart |
+| `EFFECT_OF` | Fehlerfolge |
+| `CAUSE_OF` | Fehlerursache |
+| `PREVENTED_BY` | Vermeidungsmaßnahme |
+| `DETECTED_BY` | Entdeckungsmaßnahme |
+| `OPTIMIZED_BY` | Optimierungsmaßnahme |
 
-前端 `fmeaTable.ts` 负责将图数据与 20+ 列电子表格视图之间的双向转换。
+`fmeaTable.ts` im Frontend wandelt bidirektional zwischen Graphdaten und der Tabellenansicht mit 20+ Spalten um.
 
-#### 3.1.3 风险评估：RPN 与 AP
+#### 3.1.3 Risikobewertung: RPN und AP
 
-系统同时支持两种风险评估指标：
+Das System unterstützt zwei Kennzahlen:
 
-- **RPN（风险顺序数）**：`RPN = S × O × D`，值域 1–1000
-- **AP（Action Priority）**：依据 AIAG-VDA 附录 C 的 S×O×D 矩阵，结果为 H（高）、M（中）、L（低）
+- **RPN (Risikoprioritätszahl)**: `RPN = S × O × D`, Wertebereich 1–1000
+- **AP (Action Priority)**: nach der S×O×D-Matrix aus AIAG-VDA Anhang C, Ergebnis H (hoch), M (mittel), L (niedrig)
 
-AP 优先级由后端 `compute_ap()` 函数计算，逻辑严格遵循 AIAG-VDA 手册附录 C1.5。
+Die AP berechnet die Backend-Funktion `compute_ap()` streng nach Anhang C1.5 des AIAG-VDA-Handbuchs.
 
-#### 3.1.4 特殊特性标记
+#### 3.1.4 Kennzeichnung besonderer Merkmale
 
-FMEA 节点通过 `classification` 字段标记特殊特性：
+FMEA-Knoten kennzeichnen besondere Merkmale über das Feld `classification`:
 
-- **CC（Critical Characteristic）**：关键特性
-- **SC（Special Characteristic）**：重要特性
-- 当节点的严重度 (severity) ≥ 9 时，系统自动将该 CC 节点标记为安全相关（`is_safety_suggested = true`）
+- **CC (Critical Characteristic)**: kritisches Merkmal
+- **SC (Special Characteristic)**: wichtiges Merkmal
+- Hat ein Knoten eine Bedeutung (severity) ≥ 9, markiert das System den CC-Knoten automatisch als sicherheitsrelevant (`is_safety_suggested = true`)
 
-### 3.2 操作流程
+### 3.2 Abläufe
 
-#### 3.2.1 创建 FMEA
+#### 3.2.1 FMEA anlegen
 
-1. 进入 FMEA 列表页 `/fmea`，点击「新建」
-2. 填写基本信息：
-   - **标题**：必填
-   - **FMEA 类型**：DFMEA 或 PFMEA
-   - **产品线**：默认 `DC-DC-100`
-   - **关联 DFMEA**（仅 PFMEA 可选）
-3. 系统自动生成文档编号（`PFMEA-2026-XXX` 或 `DFMEA-2026-XXX`）
-4. 初始状态为 `draft`
+1. FMEA-Liste `/fmea` öffnen und auf „Neu“ klicken
+2. Grunddaten eingeben:
+   - **Titel**: Pflicht
+   - **FMEA-Typ**: DFMEA oder PFMEA
+   - **Produktlinie**: Standard `DC-DC-100`
+   - **Verknüpfte DFMEA** (nur bei PFMEA wählbar)
+3. Das System erzeugt automatisch eine Dokumentnummer (`PFMEA-2026-XXX` oder `DFMEA-2026-XXX`)
+4. Der Anfangsstatus ist `draft`
 
-> 也可在创建后通过列表页「进入向导」入口使用七步法生成向导（见 3.2.4）完成建模。
+> Nach dem Anlegen kann die Modellierung auch über den Einstieg „Assistent öffnen“ in der Liste mit dem 7-Schritte-Assistenten (siehe 3.2.4) erfolgen.
 
-#### 3.2.2 编辑 FMEA 图谱
+#### 3.2.2 FMEA-Graph bearbeiten
 
-1. 在 FMEA 列表点击文档编号进入编辑页 `/fmea/:id`
-2. 编辑器呈现为 20+ 列的电子表格视图，每行对应一条失效模式链
-3. 所有节点操作（增/删/改）保存时提交整个 `graph_data`
-4. 系统自动计算 RPN 和 AP
+1. In der FMEA-Liste auf die Dokumentnummer klicken, um die Bearbeitungsseite `/fmea/:id` zu öffnen
+2. Der Editor zeigt eine Tabellenansicht mit 20+ Spalten; jede Zeile entspricht einer Fehlerkette
+3. Alle Knotenoperationen (anlegen/löschen/ändern) übermitteln beim Speichern das gesamte `graph_data`
+4. RPN und AP werden automatisch berechnet
 
-#### 3.2.3 审批与状态流转
+#### 3.2.3 Freigabe und Statusübergänge
 
-FMEA 状态机定义如下：
+Der Zustandsautomat der FMEA ist wie folgt definiert:
 
 ```
 draft ──→ in_review ──→ approved ──→ archived
@@ -153,198 +153,198 @@ draft ──→ in_review ──→ approved ──→ archived
 archived    in_review
 ```
 
-| 当前状态 | 允许的目标状态 | 所需权限 |
+| Aktueller Status | Erlaubte Zielstatus | Erforderliche Berechtigung |
 |----------|---------------|----------|
 | draft | in_review, archived | EDIT (3) |
-| in_review | approved, rework | APPROVE (4) 可审批到 approved；EDIT (3) 可打回 rework |
+| in_review | approved, rework | APPROVE (4) kann nach approved freigeben; EDIT (3) kann nach rework zurückgeben |
 | approved | rework, archived | APPROVE (4) |
 | rework | in_review | EDIT (3) |
 
-> **审批限制**：仅 `admin` 和 `manager` 角色可将 FMEA 推进到 `approved` 状态。
+> **Freigabebeschränkung**: Nur die Rollen `admin` und `manager` können eine FMEA in den Status `approved` bringen.
 
-#### 3.2.4 七步法生成向导
+#### 3.2.4 Erzeugungsassistent nach 7 Schritten
 
-PFMEA 与 DFMEA 均提供引导式生成向导，将 AIAG-VDA 七步法分解为可逐步完成的交互流程，降低手工建模成本。
+PFMEA und DFMEA bieten geführte Assistenten, die die 7 Schritte nach AIAG-VDA in schrittweise abzuarbeitende Interaktionen zerlegen und den manuellen Modellierungsaufwand senken.
 
-**PFMEA 向导**（`/fmea/pfmea-wizard/:id`）：
+**PFMEA-Assistent** (`/fmea/pfmea-wizard/:id`):
 
-| 步骤 | 名称 | 内容 |
+| Schritt | Name | Inhalt |
 |:----:|------|------|
-| 0 | 范围定义 | 5T 工具/趋势标签 + 时间区间 + 范围边界 |
-| 1 | 结构分析 | `PFMEAWizardSidebar` 过程项 / 工序 / 作业元素树；结构树拖拽排序（`@dnd-kit`） |
-| 2 | 功能分析 | `FunctionTreeEditor` 三级功能树 + `FUNCTION_MAPPED_TO` 边 + CC/SC 标记 |
-| 3 | 失效分析 | 在 ProcessStepFunction 上构建 FE-FM-FC 失效链，4M 语境（人/机/料/法） |
-| 4 | 风险分析 | `RiskTable`：severity 取层级 max、CC/SC 只读聚合、O/D 门禁；Step 4 上下文前置 |
-| 5 | 优化 | AP=H 的失效模式自动生成推荐措施；PC/DC 创建前置 |
-| 6 | 结果文档化 | 确认完成门禁（`usePfmeaWizardValidation`：4M/OP 门禁、3 级严重度、CC/SC 感知） |
+| 0 | Umfang | 5T-Werkzeug-/Trend-Tags + Zeitraum + Umfangsgrenzen |
+| 1 | Strukturanalyse | Baum aus Prozesselementen / Arbeitsgängen / Arbeitselementen in `PFMEAWizardSidebar`; Sortieren des Strukturbaums per Drag & Drop (`@dnd-kit`) |
+| 2 | Funktionsanalyse | Dreistufiger Funktionsbaum in `FunctionTreeEditor` + Kanten `FUNCTION_MAPPED_TO` + CC/SC-Kennzeichnung |
+| 3 | Fehleranalyse | Fehlerkette FE-FM-FC an der ProcessStepFunction im 4M-Kontext (Mensch/Maschine/Material/Methode) |
+| 4 | Risikoanalyse | `RiskTable`: severity als Maximum der Ebenen, CC/SC schreibgeschützt aggregiert, O/D-Gates; Kontext aus Schritt 4 vorab |
+| 5 | Optimierung | Für Fehlerarten mit AP=H werden automatisch Maßnahmen vorgeschlagen; PC/DC vor dem Anlegen |
+| 6 | Dokumentation der Ergebnisse | Abschluss-Gate (`usePfmeaWizardValidation`: 4M/OP-Gates, dreistufige Bedeutung, CC/SC-bewusst) |
 
-向导内置级联删除（`wizardCascadeDelete`），删除共享控制/措施节点时会校验是否被其他行引用。
+Der Assistent enthält ein kaskadierendes Löschen (`wizardCascadeDelete`); beim Löschen gemeinsamer Maßnahmenknoten wird geprüft, ob andere Zeilen sie noch referenzieren.
 
-**DFMEA 向导** 增强：时间区间改用 `DatePicker.RangePicker`；5T 工具/趋势由 AI 推荐（`pfmea_tool` / `pfmea_trend` 触发器 + 4M 规则内容）；Step 3 AI 推荐（`SmartSuggestionDropdown` 接后端触发器）；Step 5 风险分析承载 Step 4 上下文与 PC/DC 创建前置；PC/DC AI 推荐；`ToolStructureGuide` 工具结构引导卡。
+Erweiterungen des **DFMEA-Assistenten**: Zeitraum als `DatePicker.RangePicker`; 5T-Werkzeuge/-Trends per KI-Empfehlung (Auslöser `pfmea_tool` / `pfmea_trend` + 4M-Regelinhalte); KI-Empfehlungen in Schritt 3 (`SmartSuggestionDropdown` an Backend-Auslösern); Risikoanalyse in Schritt 5 mit Kontext aus Schritt 4 und PC/DC vor dem Anlegen; KI-Empfehlungen für PC/DC; Strukturleitfaden `ToolStructureGuide`.
 
-> **权限**：向导写入受 `fmea` 模块 `EDIT (3)` 权限约束；列表页仅对 `draft` 状态文档开放「进入向导」入口。
+> **Berechtigung**: Schreibvorgänge des Assistenten erfordern `EDIT (3)` im Modul `fmea`; die Liste bietet „Assistent öffnen“ nur für Dokumente im Status `draft`.
 
-#### 3.2.5 删除 FMEA
+#### 3.2.5 FMEA löschen
 
-仅 `draft` 与 `rework` 状态的 FMEA 文档可删除：
+Nur FMEA-Dokumente im Status `draft` und `rework` können gelöscht werden:
 
-- 列表页（`FMEAListPage`）对上述状态显示删除按钮；其他状态不开放入口
-- 后端状态守卫：非 `draft` / `rework` 返回 400「只能删除草稿或返工状态的FMEA」
-- 删除前执行 `_null_out_fmea_references`：将 `control_plan`、`capa_eightd` 等关联记录的 FMEA 外键置空，避免外键约束导致的 `IntegrityError` → 500
-- 删除操作写入审计日志
+- Die Liste (`FMEAListPage`) zeigt die Schaltfläche Löschen nur für diese Status
+- Statusschutz im Backend: andere Status als `draft` / `rework` liefern 400 mit dem Hinweis, dass nur FMEAs im Entwurfs- oder Überarbeitungsstatus gelöscht werden können
+- Vor dem Löschen setzt `_null_out_fmea_references` die FMEA-Fremdschlüssel verknüpfter Datensätze (`control_plan`, `capa_eightd` usw.) auf NULL, damit Fremdschlüssel-Constraints kein `IntegrityError` → 500 auslösen
+- Das Löschen wird im Audit-Log erfasst
 
-> **权限**：删除受 `fmea` 模块 `EDIT (3)` 权限约束；已审批 / 归档文档不可删除，需先退回 `rework`。
+> **Berechtigung**: Löschen erfordert `EDIT (3)` im Modul `fmea`; freigegebene/archivierte Dokumente können nicht gelöscht werden und müssen zuerst nach `rework` zurückgegeben werden.
 
-### 3.3 版本管理
+### 3.3 Versionsverwaltung
 
-FMEA 支持版本快照：每次审批通过时自动创建版本记录（`fmea_versions` 表），包含：
+FMEAs unterstützen Versions-Snapshots: Bei jeder Freigabe entsteht automatisch ein Versionsdatensatz (Tabelle `fmea_versions`) mit:
 
-- **主版本号 + 次版本号**（如 1.0、1.1）
-- **完整图谱快照**（`snapshot` JSONB）
-- **SHA-256 哈希**（`sha256_hash`），用于完整性校验
-- **变更摘要和类型**（`change_summary`, `change_type`）
+- **Haupt- und Nebenversion** (z. B. 1.0, 1.1)
+- **Vollständigem Graph-Snapshot** (`snapshot` JSONB)
+- **SHA-256-Hash** (`sha256_hash`) zur Integritätsprüfung
+- **Änderungszusammenfassung und -art** (`change_summary`, `change_type`)
 
-**版本快照只读查看器**：编辑器顶部版本历史中可切换查看任一历史版本，进入只读模式（`viewingVersion` 状态，`FMEAVersionSnapshot` 组件），完整还原该版本图谱而不影响当前可编辑态。控制计划编辑器提供对等的 `CPVersionSnapshot` 只读查看器。
+**Schreibgeschützte Ansicht von Versions-Snapshots**: In der Versionshistorie oben im Editor lässt sich jede frühere Version im Nur-Lese-Modus ansehen (Zustand `viewingVersion`, Komponente `FMEAVersionSnapshot`); der Graph dieser Version wird vollständig wiederhergestellt, ohne den bearbeitbaren aktuellen Stand zu beeinflussen. Der Editor des Produktionslenkungsplans bietet entsprechend `CPVersionSnapshot`.
 
-### 3.4 FMEA 与控制计划的关联
+### 3.4 Verknüpfung FMEA und Produktionslenkungsplan
 
-- 控制计划创建时可选择关联 FMEA（`fmea_ref_id`）
-- 从用户明确选择的真实已批准 PFMEA 版本快照派生，不读当前返工图。每项特性一行：同一步骤 2 产品＋3 过程得到 5 条明细，非笛卡尔积。
-- 结构节点通过 `HAS_FUNCTION` 挂功能，`Function.characteristics[]` 存储特性。步骤所属功能为 product，工作要素所属功能为 process。
-- `step_no/process_name` 来自真实步骤；`equipment` 来自工作要素；名称、规范、特殊分类各来自对应特性，不把测量活动当作对象。
+- Beim Anlegen eines Produktionslenkungsplans kann eine FMEA verknüpft werden (`fmea_ref_id`)
+- Abgeleitet wird aus dem vom Benutzer ausdrücklich gewählten, tatsächlich freigegebenen PFMEA-Versions-Snapshot, nicht aus dem aktuellen Überarbeitungsgraphen. Je Merkmal eine Zeile: derselbe Schritt mit 2 Produkt- und 3 Prozessmerkmalen ergibt 5 Zeilen, kein kartesisches Produkt.
+- Strukturknoten hängen Funktionen über `HAS_FUNCTION` an, `Function.characteristics[]` speichert die Merkmale. Funktionen eines Schritts sind product, Funktionen eines Arbeitselements process.
+- `step_no/process_name` stammen aus dem tatsächlichen Schritt; `equipment` aus dem Arbeitselement; Name, Spezifikation und besondere Klassifizierung jeweils aus dem zugehörigen Merkmal – Messaktivitäten werden nicht als Objekt behandelt.
 
 ---
 
-## 4. 控制计划
+## 4. Produktionslenkungsplan
 
-### 4.1 概述
+### 4.1 Überblick
 
-控制计划（Control Plan）是 APQP Phase 3 的核心交付物，定义产品/过程的控制方法、规格、抽样和反应计划。
+Der Produktionslenkungsplan (Control Plan) ist das zentrale Ergebnis der APQP-Phase 3 und legt Lenkungsmethoden, Spezifikationen, Stichproben und Reaktionspläne für Produkt und Prozess fest.
 
-### 4.2 数据模型
+### 4.2 Datenmodell
 
-控制计划由表头（`ControlPlan`）和行项（`ControlPlanItem`）组成：
+Der Produktionslenkungsplan besteht aus Kopf (`ControlPlan`) und Zeilen (`ControlPlanItem`):
 
-**表头字段：**
+**Kopffelder:**
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| document_no | 文档编号，格式 `CP-2026-XXX` |
-| title | 标题 |
-| fmea_ref_id | 关联的 FMEA 文档 |
-| source_fmea_version_id | 关联的 FMEA 版本快照 |
-| phase | 阶段：`prototype`（样件）、`pre_launch`（试生产）、`production`（量产，默认） |
-| part_no / part_name | 零件号/名称 |
-| drawing_rev | 图纸版本 |
-| org_factory | 责任工厂/组织 |
-| core_group | 核心小组 |
-| contact_info | 联系方式 |
-| customer_requirements | 客户要求（JSONB） |
-| status | 状态：`draft` / `approved` |
-| version | 版本号 |
-| lock_version | 乐观锁版本 |
+| document_no | Dokumentnummer, Format `CP-2026-XXX` |
+| title | Titel |
+| fmea_ref_id | Verknüpftes FMEA-Dokument |
+| source_fmea_version_id | Verknüpfter FMEA-Versions-Snapshot |
+| phase | Phase: `prototype` (Prototyp), `pre_launch` (Vorserie), `production` (Serie, Standard) |
+| part_no / part_name | Teilenummer/-name |
+| drawing_rev | Zeichnungsstand |
+| org_factory | Verantwortliches Werk/Organisation |
+| core_group | Kernteam |
+| contact_info | Kontaktdaten |
+| customer_requirements | Kundenanforderungen (JSONB) |
+| status | Status: `draft` / `approved` |
+| version | Versionsnummer |
+| lock_version | Version für optimistische Sperre |
 
-**行项字段：**
+**Zeilenfelder:**
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| step_no | 过程编号 |
-| process_name | 过程名称 |
-| equipment | 设备 |
-| product_characteristic | 产品特性 |
-| process_characteristic | 过程特性 |
-| special_class | 特殊特性分类（CC/SC） |
-| specification_tolerance | 规格/公差 |
-| evaluation_method | 评价方法 |
-| sample_size / sample_frequency | 样本量/频次 |
-| control_method | 控制方法 |
-| reaction_plan | 反应计划 |
-| source_fmea_node_id | 来源 FMEA 节点 ID |
-| item_source | 来源标记（`fmea` 或 `manual`） |
-| sop_ref | 作业指导书编号 |
-| spc_chart_id | 关联 SPC 控制图 |
-| gauge_id | 关联量具 |
+| step_no | Prozessnummer |
+| process_name | Prozessname |
+| equipment | Anlage |
+| product_characteristic | Produktmerkmal |
+| process_characteristic | Prozessmerkmal |
+| special_class | Klassifizierung besonderer Merkmale (CC/SC) |
+| specification_tolerance | Spezifikation/Toleranz |
+| evaluation_method | Bewertungsmethode |
+| sample_size / sample_frequency | Stichprobenumfang/-häufigkeit |
+| control_method | Lenkungsmethode |
+| reaction_plan | Reaktionsplan |
+| source_fmea_node_id | ID des Quell-FMEA-Knotens |
+| item_source | Quellkennzeichen (`fmea` oder `manual`) |
+| sop_ref | Nummer der Arbeitsanweisung |
+| spc_chart_id | Verknüpfte SPC-Regelkarte |
+| gauge_id | Verknüpftes Prüfmittel |
 
-### 4.3 从 PFMEA 导入
+### 4.3 Import aus PFMEA
 
-1. 草稿 CP 点击「从 PFMEA 导入」，选择 PFMEA 和 `change_type=approve` 的 v1.0+ 历史快照，再选择快照工序（`step_ids`）。
-2. 生成只读预览；预览／确认绑定 `source_fmea_version_id`、`expected_lock_version`、`preview_digest`，确认发送 `selected_candidate_keys`。candidate_key 区分同来源的不同控制行，不能改发裸行 UUID。
-3. 每项特性生成独立 CP 行；完整 source_characteristic_ref 是服务端只读元数据（文档／工序／功能／工作要素／特性 UUID／mapping_version／accepted_source_version_id）。普通编辑白名单不回写它。
-4. 新版本批准后 durable CP outbox 提示 pending；显式预览／接受。409 使旧预览失效，不自动重试；部分接受仍 pending，再次确认须显式新预览。行 UUID 与手工方法／抽样／反应字段保持；未变行不虚增逐行接受版本，全部覆盖才推进文档 source_fmea_version_id。
-5. 活动 CAPA 有效材料、执行／SC 引用、冲突和旧混合行受保守保护，不能自动删除或清除待办；此功能不新增已批准 CP 返工路径。
+1. Im Entwurf auf „Aus PFMEA importieren“ klicken, eine PFMEA und einen historischen Snapshot ab v1.0 mit `change_type=approve` wählen, dann die Arbeitsgänge des Snapshots (`step_ids`).
+2. Es entsteht eine schreibgeschützte Vorschau; Vorschau/Bestätigung binden `source_fmea_version_id`, `expected_lock_version` und `preview_digest`, die Bestätigung sendet `selected_candidate_keys`. Ein candidate_key unterscheidet verschiedene Lenkungszeilen derselben Quelle; stattdessen nackte Zeilen-UUIDs zu senden ist nicht zulässig.
+3. Jedes Merkmal ergibt eine eigene CP-Zeile; die vollständige source_characteristic_ref ist serverseitige Nur-Lese-Metadaten (Dokument/Arbeitsgang/Funktion/Arbeitselement/Merkmals-UUID/mapping_version/accepted_source_version_id). Die Allowlist normaler Bearbeitung schreibt sie nicht zurück.
+4. Nach Freigabe einer neuen Version meldet die dauerhafte CP-Outbox pending; Vorschau und Annahme erfolgen ausdrücklich. Ein 409 macht die alte Vorschau ungültig, ohne automatischen Neuversuch; eine Teilannahme bleibt pending, eine erneute Bestätigung braucht eine ausdrücklich neue Vorschau. Zeilen-UUIDs und manuelle Felder zu Methode/Stichprobe/Reaktion bleiben erhalten; unveränderte Zeilen erhalten keine künstliche neue Annahmeversion, erst bei vollständiger Abdeckung wird das source_fmea_version_id des Dokuments fortgeschrieben.
+5. Wirksames Material aktiver CAPAs, Ausführungs-/SC-Referenzen, Konflikte und alte gemischte Zeilen werden konservativ geschützt und nicht automatisch gelöscht oder als erledigt markiert; diese Funktion schafft keinen neuen Überarbeitungspfad für freigegebene Produktionslenkungspläne.
 
-> **限制**：仅 PFMEA 类型文档可导入到控制计划；已审批的控制计划不可导入。
+> **Einschränkung**: Nur Dokumente vom Typ PFMEA können in Produktionslenkungspläne importiert werden; in freigegebene Produktionslenkungspläne kann nicht importiert werden.
 
-### 4.4 审批
+### 4.4 Freigabe
 
-控制计划的审批流程：
+Ablauf der Freigabe des Produktionslenkungsplans:
 
-1. 状态从 `draft` → `approved`
-2. 审批时系统自动执行**量具验证**：检查所有关联量具是否激活且在有效校准期内
-3. 审批通过后自动创建版本快照（`control_plan_versions` 表）
-4. 版本快照包含：
-   - 表头快照（`header_snapshot`）
-   - 行项快照（`items_snapshot`）
-   - SHA-256 哈希（`sha256_hash`）
-   - 关联的 FMEA 版本 ID（`source_fmea_version_id`）
+1. Status von `draft` → `approved`
+2. Bei der Freigabe führt das System automatisch eine **Prüfmittelprüfung** aus: Alle verknüpften Prüfmittel müssen aktiv und innerhalb der gültigen Kalibrierung sein
+3. Nach der Freigabe entsteht automatisch ein Versions-Snapshot (Tabelle `control_plan_versions`)
+4. Der Versions-Snapshot enthält:
+   - Snapshot des Kopfs (`header_snapshot`)
+   - Snapshot der Zeilen (`items_snapshot`)
+   - SHA-256-Hash (`sha256_hash`)
+   - ID der verknüpften FMEA-Version (`source_fmea_version_id`)
 
-> **审批权限**：仅 `admin` 和 `manager` 角色可审批控制计划。
+> **Freigaberecht**: Nur die Rollen `admin` und `manager` können Produktionslenkungspläne freigeben.
 
-### 4.5 CP 验证引擎
+### 4.5 Prüf-Engine für Produktionslenkungspläne
 
-系统内置控制计划验证引擎（`CPValidationEngine`），支持自动和手动触发验证：
+Das System enthält eine Prüf-Engine (`CPValidationEngine`) mit automatischer und manueller Auslösung:
 
-- **触发方式**：`manual`（手动）、`auto_on_save`（保存时自动）、`fmea_change`（FMEA 变更触发）
-- **验证结果**：每条规则返回 error / warning / info 级别
-- **验证记录**：存储在 `cp_validation_runs` 和 `cp_validation_findings` 表
+- **Auslöser**: `manual` (manuell), `auto_on_save` (beim Speichern), `fmea_change` (bei FMEA-Änderung)
+- **Prüfergebnisse**: jede Regel liefert error / warning / info
+- **Prüfdatensätze**: gespeichert in den Tabellen `cp_validation_runs` und `cp_validation_findings`
 
-验证运行状态：
+Status eines Prüflaufs:
 
-| 状态 | 说明 |
+| Status | Beschreibung |
 |------|------|
-| running | 验证进行中 |
-| completed | 验证完成 |
-| failed | 验证异常 |
+| running | Prüfung läuft |
+| completed | Prüfung abgeschlossen |
+| failed | Prüfung fehlerhaft |
 
 ---
 
 ## 5. APQP
 
-### 5.1 概述
+### 5.1 Überblick
 
-APQP（Advanced Product Quality Planning，产品质量先期策划）是 IATF 16949 标准要求的项目管理框架，用于确保新产品开发过程满足客户要求。
+APQP (Advanced Product Quality Planning, Produktqualitätsvorausplanung) ist ein von IATF 16949 gefordertes Projektmanagement-Rahmenwerk, das sicherstellt, dass die Neuproduktentwicklung die Kundenanforderungen erfüllt.
 
-### 5.2 五阶段门径模型
+### 5.2 Gate-Modell mit fünf Phasen
 
-| 阶段 | 名称 | 关键交付物 | 交付物检查 |
+| Phase | Name | Wichtige Ergebnisse | Ergebnisprüfung |
 |:----:|------|-----------|-----------|
-| 1 | 计划与确定项目 (Plan & Define) | 项目计划、目标设定 | 无强制检查 |
-| 2 | 产品设计与开发 (Product Design & Development) | DFMEA | 需关联 DFMEA |
-| 3 | 过程设计与开发 (Process Design & Development) | PFMEA、控制计划 | 需关联 PFMEA 和控制计划 |
-| 4 | 产品与过程确认 (Product & Process Validation) | PPAP | 需关联 PPAP 提交 |
-| 5 | 反馈评估与纠正措施 (Feedback & Corrective Action) | 项目总结 | 阶段 5 完成后项目标记为 completed |
+| 1 | Planen und Definieren (Plan & Define) | Projektplan, Zielsetzung | Keine Pflichtprüfung |
+| 2 | Produktdesign und -entwicklung (Product Design & Development) | DFMEA | DFMEA muss verknüpft sein |
+| 3 | Prozessdesign und -entwicklung (Process Design & Development) | PFMEA, Produktionslenkungsplan | PFMEA und Produktionslenkungsplan müssen verknüpft sein |
+| 4 | Produkt- und Prozessvalidierung (Product & Process Validation) | PPAP | PPAP-Einreichung muss verknüpft sein |
+| 5 | Rückmeldung, Bewertung und Korrekturmaßnahmen (Feedback & Corrective Action) | Projektabschluss | Nach Abschluss von Phase 5 wird das Projekt als completed markiert |
 
-> **交付物检查**：门径审批时，系统验证当前阶段是否已关联必要交付物。未满足条件时，审批将被拒绝。
+> **Ergebnisprüfung**: Bei der Gate-Freigabe prüft das System, ob die aktuelle Phase die nötigen Ergebnisse verknüpft hat. Andernfalls wird die Freigabe abgelehnt.
 
-### 5.3 数据模型
+### 5.3 Datenmodell
 
-**APQPProject 主要字段：**
+**Wichtige Felder von APQPProject:**
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| project_code | 项目编号，格式 `APQP-2026-XXX` |
-| project_name | 项目名称 |
-| product_name | 产品名称 |
-| product_line_code | 产品线编码 |
-| customer_name | 客户名称 |
-| target_sop_date | 目标 SOP 日期 |
-| team_members | 团队成员（JSONB） |
-| current_phase | 当前阶段（1-5） |
-| phase_status | 阶段状态：`in_progress` / `pending_approval` / `completed` |
-| project_status | 项目状态：`active` / `completed` / `cancelled` |
-| dfmea_id / pfmea_id / control_plan_id / ppap_submission_id | 关联交付物 |
+| project_code | Projektnummer, Format `APQP-2026-XXX` |
+| project_name | Projektname |
+| product_name | Produktname |
+| product_line_code | Produktliniencode |
+| customer_name | Kundenname |
+| target_sop_date | Ziel-SOP-Datum |
+| team_members | Teammitglieder (JSONB) |
+| current_phase | Aktuelle Phase (1–5) |
+| phase_status | Phasenstatus: `in_progress` / `pending_approval` / `completed` |
+| project_status | Projektstatus: `active` / `completed` / `cancelled` |
+| dfmea_id / pfmea_id / control_plan_id / ppap_submission_id | Verknüpfte Ergebnisse |
 
-### 5.4 门径状态流转
+### 5.4 Statusübergänge der Gates
 
 ```
 in_progress ──submit_gate──→ pending_approval ──approve_gate──→ next phase (in_progress)
@@ -353,19 +353,19 @@ in_progress ──submit_gate──→ pending_approval ──approve_gate──
                                 │
                                 └──(phase 5 approve)──→ completed
 
-任何阶段均可 cancel ──→ cancelled
+In jeder Phase möglich cancel ──→ cancelled
 ```
 
-| 动作 | 当前状态要求 | 目标状态 | 所需权限 |
+| Aktion | Erforderlicher aktueller Status | Zielstatus | Erforderliche Berechtigung |
 |------|-------------|---------|----------|
 | submit_gate | in_progress | pending_approval | CREATE (2) |
-| approve_gate | pending_approval | 下一阶段 in_progress 或 completed | APPROVE (4) |
+| approve_gate | pending_approval | Nächste Phase in_progress oder completed | APPROVE (4) |
 | reject_gate | pending_approval | in_progress | APPROVE (4) |
-| cancel | 任意 | cancelled | ADMIN (5) |
+| cancel | Beliebig | cancelled | ADMIN (5) |
 
-### 5.5 门径历史
+### 5.5 Gate-Historie
 
-每个门径动作记录在 `gate_history` JSONB 字段中：
+Jede Gate-Aktion wird im JSONB-Feld `gate_history` erfasst:
 
 ```json
 {
@@ -373,66 +373,66 @@ in_progress ──submit_gate──→ pending_approval ──approve_gate──
   "action": "approve",
   "user_id": "...",
   "user_name": "...",
-  "comments": "DFMEA 已完成审批",
+  "comments": "DFMEA Freigabe abgeschlossen",
   "timestamp": "2026-06-13T08:30:00Z"
 }
 ```
 
-### 5.6 项目生命周期
+### 5.6 Projektlebenszyklus
 
 ```
-创建项目 (active, phase 1) 
-  → 完成阶段 1 → 提交门径 → 审批通过 → 进入阶段 2
-    → 关联 DFMEA → 完成阶段 2 → 提交门径 → 审批通过 → 进入阶段 3
-      → 关联 PFMEA + 控制计划 → 完成阶段 3 → 提交门径 → 审批通过 → 进入阶段 4
-        → 关联 PPAP → 完成阶段 4 → 提交门径 → 审批通过 → 进入阶段 5
-          → 完成阶段 5 → 提交门径 → 审批通过 → 项目 completed
+Projekt anlegen (active, phase 1) 
+  → Phase 1 abschließen → Gate einreichen → Freigabe → nächste Phase 2
+    → DFMEA verknüpfen → Phase 2 abschließen → Gate einreichen → Freigabe → nächste Phase 3
+      → PFMEA + Produktionslenkungsplan verknüpfen → Phase 3 abschließen → Gate einreichen → Freigabe → nächste Phase 4
+        → PPAP verknüpfen → Phase 4 abschließen → Gate einreichen → Freigabe → nächste Phase 5
+          → Phase 5 abschließen → Gate einreichen → Freigabe → Projekt completed
 ```
 
 ---
 
 ## 6. PPAP
 
-### 6.1 概述
+### 6.1 Überblick
 
-PPAP（Production Part Approval Process，生产件批准程序）是汽车行业供应商向客户证明生产过程能力的标准流程。OpenQMS 实现 PPAP Level 1–5 提交管理，覆盖 AIAG 规定的 18 项提交要素。
+PPAP (Production Part Approval Process, Produktionsteil-Abnahmeverfahren) ist das Standardverfahren, mit dem Lieferanten in der Automobilindustrie dem Kunden ihre Prozessfähigkeit nachweisen. OpenQMS verwaltet PPAP-Einreichungen der Level 1–5 und deckt die 18 von AIAG festgelegten Elemente ab.
 
-### 6.2 PPAP 提交等级
+### 6.2 PPAP-Vorlagestufen
 
-| 等级 | 说明 | 适用场景 |
+| Stufe | Beschreibung | Einsatzbereich |
 |:----:|------|---------|
-| 1 | 仅提交保证书 (PSW) | 客户指定 |
-| 2 | 提交保证书 + 样品 | 客户指定 |
-| 3 | 提交保证书 + 样品 + 完整数据 | 新零件首次提交（默认） |
-| 4 | 提交保证书 + 完整数据（不送样） | 设计变更 |
-| 5 | 不提交，仅保留在制造现场 | 客户书面授权 |
+| 1 | Nur Teilevorlagebestätigung (PSW) | Nach Kundenvorgabe |
+| 2 | PSW + Muster | Nach Kundenvorgabe |
+| 3 | PSW + Muster + vollständige Daten | Erstvorlage neuer Teile (Standard) |
+| 4 | PSW + vollständige Daten (ohne Muster) | Konstruktionsänderung |
+| 5 | Keine Einreichung, nur Aufbewahrung am Fertigungsstandort | Schriftliche Genehmigung des Kunden |
 
-### 6.3 18 项提交要素
+### 6.3 Die 18 Vorlageelemente
 
-| 序号 | 要素名称 | 英文名称 |
+| Nr. | Element | Englische Bezeichnung |
 |:----:|---------|---------|
-| 1 | 设计记录 | Design Records |
-| 2 | 工程变更文件 | Authorized Engineering Change Documents |
-| 3 | 客户工程批准 | Customer Engineering Approval |
-| 4 | 设计 FMEA | Design FMEA |
-| 5 | 过程流程图 | Process Flow Diagrams |
-| 6 | 过程 FMEA | Process FMEA |
-| 7 | 控制计划 | Control Plan |
-| 8 | 测量系统分析 | Measurement System Analysis |
-| 9 | 尺寸结果 | Dimensional Results |
-| 10 | 材料/性能试验结果 | Material / Performance Test Results |
-| 11 | 初始过程研究 | Initial Process Studies |
-| 12 | 合格实验室文件 | Qualified Laboratory Documentation |
-| 13 | 外观批准报告 | Appearance Approval Report |
-| 14 | 样件 | Sample Production Parts |
-| 15 | 检具 | Checking Aids |
-| 16 | 客户特殊要求 | Customer-Specific Requirements |
-| 17 | 零件提交保证书 | Part Submission Warrant — PSW |
-| 18 | 散装材料要求检查表 | Bulk Material Requirements Checklist |
+| 1 | Konstruktionsunterlagen | Design Records |
+| 2 | Dokumente zu technischen Änderungen | Authorized Engineering Change Documents |
+| 3 | Technische Freigabe des Kunden | Customer Engineering Approval |
+| 4 | Design-FMEA | Design FMEA |
+| 5 | Prozessablaufdiagramm | Process Flow Diagrams |
+| 6 | Prozess-FMEA | Process FMEA |
+| 7 | Produktionslenkungsplan | Control Plan |
+| 8 | Messsystemanalyse | Measurement System Analysis |
+| 9 | Maßliche Ergebnisse | Dimensional Results |
+| 10 | Material-/Leistungsprüfergebnisse | Material / Performance Test Results |
+| 11 | Vorläufige Prozessfähigkeitsuntersuchung | Initial Process Studies |
+| 12 | Dokumentation qualifizierter Labore | Qualified Laboratory Documentation |
+| 13 | Bericht zur Freigabe des Erscheinungsbilds | Appearance Approval Report |
+| 14 | Musterteile | Sample Production Parts |
+| 15 | Prüfmittel | Checking Aids |
+| 16 | Kundenspezifische Anforderungen | Customer-Specific Requirements |
+| 17 | Teilevorlagebestätigung (PSW) | Part Submission Warrant — PSW |
+| 18 | Checkliste für Schüttgutanforderungen | Bulk Material Requirements Checklist |
 
-每项要素包含：`required`（是否必填）、`status`（pending / approved / rejected）、`file_url`（附件）、`notes`（备注）。
+Jedes Element enthält: `required` (Pflicht ja/nein), `status` (pending / approved / rejected), `file_url` (Anhang), `notes` (Notizen).
 
-### 6.4 PPAP 状态生命周期
+### 6.4 Lebenszyklus einer PPAP-Einreichung
 
 ```
 draft ──submit──→ under_review ──approve──→ approved
@@ -440,254 +440,254 @@ draft ──submit──→ under_review ──approve──→ approved
                       └──reject──→ rejected ──resubmit──→ under_review
 ```
 
-| 动作 | 当前状态 | 目标状态 | 所需权限 | 附加条件 |
+| Aktion | Aktueller Status | Zielstatus | Erforderliche Berechtigung | Zusätzliche Bedingungen |
 |------|---------|---------|----------|---------|
-| submit | draft | under_review | CREATE (2) | 自动设置 submission_date |
-| approve | under_review | approved | APPROVE (4) | 所有必填要素必须已 approved |
-| reject | under_review | rejected | APPROVE (4) | 必须填写驳回原因 |
-| resubmit | rejected | under_review | CREATE (2) | revision 自增 +1 |
+| submit | draft | under_review | CREATE (2) | submission_date wird automatisch gesetzt |
+| approve | under_review | approved | APPROVE (4) | Alle Pflichtelemente müssen approved sein |
+| reject | under_review | rejected | APPROVE (4) | Zurückweisungsgrund ist Pflicht |
+| resubmit | rejected | under_review | CREATE (2) | revision wird um 1 erhöht |
 
-### 6.5 数据模型
+### 6.5 Datenmodell
 
-**SupplierPPAPSubmission 主要字段：**
+**Wichtige Felder von SupplierPPAPSubmission:**
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| ppap_no | PPAP 编号，格式 `PPAP-2026-XXX` |
-| supplier_id | 供应商 ID |
-| part_no / part_name | 零件号/名称 |
-| submission_level | 提交等级（1-5） |
-| submission_date | 提交日期 |
-| status | 状态：draft / under_review / approved / rejected |
-| revision | 修订版本号 |
-| rejection_reason | 驳回原因 |
-| customer_name | 客户名称 |
-| product_line_code | 产品线编码 |
+| ppap_no | PPAP-Nummer, Format `PPAP-2026-XXX` |
+| supplier_id | Lieferanten-ID |
+| part_no / part_name | Teilenummer/-name |
+| submission_level | Vorlagestufe (1–5) |
+| submission_date | Einreichungsdatum |
+| status | Status: draft / under_review / approved / rejected |
+| revision | Revisionsnummer |
+| rejection_reason | Zurückweisungsgrund |
+| customer_name | Kundenname |
+| product_line_code | Produktliniencode |
 
-> **审批规则**：审批时系统自动检查所有 `required=True` 的要素是否全部 `approved`，未满足时拒绝审批。
+> **Freigaberegel**: Bei der Freigabe prüft das System, ob alle Elemente mit `required=True` `approved` sind; sonst wird die Freigabe abgelehnt.
 
 ---
 
-## 7. 特殊特性
+## 7. Besondere Merkmale
 
-### 7.1 概述
+### 7.1 Überblick
 
-特殊特性管理模块负责识别、分类和追溯 CC（Critical Characteristic，关键特性）和 SC（Special Characteristic，重要特性），确保从 FMEA 到控制计划到 MSA 的完整覆盖。
+Die Verwaltung besonderer Merkmale erkennt, klassifiziert und verfolgt CC (Critical Characteristic, kritisches Merkmal) und SC (Special Characteristic, wichtiges Merkmal) und stellt die vollständige Abdeckung von FMEA über Produktionslenkungsplan bis MSA sicher.
 
-### 7.2 特殊特性类型
+### 7.2 Arten besonderer Merkmale
 
-| 类型 | 缩写 | 说明 |
+| Art | Kürzel | Beschreibung |
 |------|:----:|------|
-| 关键特性 | CC | 影响产品安全/法规符合性的特性 |
-| 重要特性 | SC | 影响产品功能/质量但非安全相关的特性 |
+| Kritisches Merkmal | CC | Merkmal mit Einfluss auf Produktsicherheit/Einhaltung gesetzlicher Vorgaben |
+| Wichtiges Merkmal | SC | Merkmal mit Einfluss auf Funktion/Qualität, aber nicht sicherheitsrelevant |
 
-### 7.3 特殊特性识别方式
+### 7.3 Erkennung besonderer Merkmale
 
-1. **从 FMEA 同步**：新结构化来源只按 `characteristics[].classification` 的显式 CC/SC 提取，kind、规范和单位独立；未分类或 [] 不按功能分类／严重度自动升级。仅没有集合的 legacy 图继续兼容原节点 classification／severity 建议规则，该兼容不是新来源的通用识别政策。
-2. **手动创建**：在特殊特性列表页直接创建
+1. **Synchronisation aus FMEA**: Neue strukturierte Quellen werden nur über ausdrückliches CC/SC in `characteristics[].classification` extrahiert; kind, Spezifikation und Einheit sind unabhängig; nicht klassifizierte Einträge oder [] werden weder nach Funktionsklassifizierung noch nach Bedeutung automatisch hochgestuft. Nur alte Graphen ohne Merkmalsmenge nutzen weiterhin die bisherigen Vorschlagsregeln über classification/severity des Knotens; diese Kompatibilität ist keine allgemeine Erkennungsregel für neue Quellen.
+2. **Manuelles Anlegen**: direkt in der Liste besonderer Merkmale
 
-#### 7.3.1 FMEA 同步逻辑
+#### 7.3.1 Logik der FMEA-Synchronisation
 
-系统 `sync_from_fmea` 对新结构化来源按 FMEA 文档＋特性 UUID 提取，kind、classification、specification 独立。显式数组（含 []）优先，未分类不按功能分类或严重度升级；缺失数组仍按兼容规则读取旧图，不批量迁移。改名保留身份，不按同名自动建立 DFMEA 父特性。
+`sync_from_fmea` extrahiert neue strukturierte Quellen nach FMEA-Dokument + Merkmals-UUID; kind, classification und specification sind unabhängig. Ausdrückliche Arrays (auch []) haben Vorrang, nicht klassifizierte Einträge werden weder nach Funktionsklassifizierung noch nach Bedeutung hochgestuft; fehlen Arrays, werden alte Graphen weiterhin nach den Kompatibilitätsregeln gelesen, ohne Massenmigration. Umbenennungen behalten die Identität; DFMEA-Elternmerkmale werden nicht anhand gleicher Namen automatisch angelegt.
 
-submitted／approved 安全 SC 的材料、身份、来源绑定及审批状态不被自动改写／删除；源变化只提示复核。新来源 CP 自动入口只读精确追溯并引导正式版本同步，不覆盖批准 CP 或人工内容。追溯按完整 source_ref＋RequestScope 派生全部匹配行，而非最后一个 cp_item_id；无实际 SPC／量具／同范围 MSA 研究结果就显示缺失，不以缓存 PASS 冒充证据。
+Material, Identität, Quellbindung und Freigabestatus von Sicherheits-SCs im Status submitted/approved werden nicht automatisch geändert oder gelöscht; Quelländerungen lösen nur einen Prüfhinweis aus. Der automatische CP-Einstieg neuer Quellen verfolgt nur schreibgeschützt exakt zurück und führt zur Synchronisation formaler Versionen, ohne freigegebene Produktionslenkungspläne oder manuelle Inhalte zu überschreiben. Die Rückverfolgung leitet aus vollständiger source_ref + RequestScope alle passenden Zeilen ab, nicht nur die letzte cp_item_id; ohne tatsächliche SPC-/Prüfmittel-/MSA-Studienergebnisse im selben Bereich wird „fehlt“ angezeigt, ein gecachtes PASS gilt nicht als Nachweis.
 
-**未修复后续项**：旧手工 SC 更新／删除的安全保护和通用 create 审计缺陷未在本功能修正；不能把自动同步保护解释为全局安全流程认证。
+**Offene Folgepunkte**: Der Sicherheitsschutz für Aktualisierung/Löschen alter manueller SCs und der Fehler im allgemeinen create-Audit sind mit dieser Funktion nicht behoben; der Schutz der automatischen Synchronisation ist keine Zertifizierung eines globalen Sicherheitsprozesses.
 
-### 7.4 安全特性审批流程
+### 7.4 Freigabeablauf für Sicherheitsmerkmale
 
-当 `is_safety_suggested = true` 或 `is_safety_related = true` 时，需经过安全审批：
+Bei `is_safety_suggested = true` oder `is_safety_related = true` ist eine Sicherheitsfreigabe nötig:
 
 ```
-pending ──submitted──→ submitted ──approved──→ approved ──(重新评估)──→ pending
+pending ──submitted──→ submitted ──approved──→ approved ──(Neu bewerten)──→ pending
                           │
-                          └──rejected──→ rejected ──(重新提交)──→ submitted
+                          └──rejected──→ rejected ──(Erneut einreichen)──→ submitted
 ```
 
-| 状态 | 说明 | 可执行操作 |
+| Status | Beschreibung | Mögliche Aktionen |
 |------|------|-----------|
-| pending | 待提交 | 提交审批 (submit) |
-| submitted | 已提交 | 审批通过 (approve) 或驳回 (reject) |
-| approved | 已批准 | 变更后回到 pending 重新评估 |
-| rejected | 已驳回 | 重新提交 (submit) |
+| pending | Einzureichen | Zur Freigabe einreichen (submit) |
+| submitted | Eingereicht | Freigeben (approve) oder zurückweisen (reject) |
+| approved | Freigegeben | Nach Änderung zurück auf pending zur Neubewertung |
+| rejected | Zurückgewiesen | Erneut einreichen (submit) |
 
-> **安全特性审批权限**：仅 `admin` 和 `manager` 角色可审批安全特性。
+> **Freigaberecht für Sicherheitsmerkmale**: Nur die Rollen `admin` und `manager` können Sicherheitsmerkmale freigeben.
 
-安全特性附加字段：
+Zusatzfelder von Sicherheitsmerkmalen:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| is_safety_related | 是否安全特性 |
-| is_safety_suggested | 系统是否建议标记为安全特性（severity ≥ 9 的 CC） |
-| safety_approval_status | 安全审批状态 |
-| safety_regulation_ref | 法规依据 |
-| safety_verification_method | 验证方法 |
-| safety_approval_comment | 审批意见 |
+| is_safety_related | Sicherheitsmerkmal ja/nein |
+| is_safety_suggested | Vom System als Sicherheitsmerkmal vorgeschlagen (CC mit severity ≥ 9) |
+| safety_approval_status | Status der Sicherheitsfreigabe |
+| safety_regulation_ref | Rechtsgrundlage |
+| safety_verification_method | Verifizierungsmethode |
+| safety_approval_comment | Freigabekommentar |
 
-### 7.5 覆盖率矩阵
+### 7.5 Abdeckungsmatrix
 
-覆盖率矩阵页面（`/special-characteristics/matrix`）展示特殊特性在 FMEA、控制计划、MSA 各环节的覆盖情况：
+Die Seite Abdeckungsmatrix (`/special-characteristics/matrix`) zeigt die Abdeckung besonderer Merkmale in FMEA, Produktionslenkungsplan und MSA:
 
-- **行**：每条特殊特性
-- **列**：FMEA 节点、控制计划行项、MSA 研究
-- **标记**：已覆盖 ✓ / 未覆盖 ✗
+- **Zeilen**: je besonderes Merkmal
+- **Spalten**: FMEA-Knoten, Zeilen des Produktionslenkungsplans, MSA-Studien
+- **Kennzeichnung**: abgedeckt ✓ / nicht abgedeckt ✗
 
-覆盖率检查逻辑：
-- 特性是否关联了 FMEA 节点（`source_fmea_id` + `source_node_id`）
-- 特性是否关联了控制计划行项（`cp_item_id`）
-- 特性是否关联了 MSA 研究（`msa_study_id`）及其状态
+Prüflogik der Abdeckung:
+- Ist das Merkmal mit einem FMEA-Knoten verknüpft (`source_fmea_id` + `source_node_id`)
+- Ist das Merkmal mit einer Zeile des Produktionslenkungsplans verknüpft (`cp_item_id`)
+- Ist das Merkmal mit einer MSA-Studie verknüpft (`msa_study_id`) und deren Status
 
-### 7.6 追溯性视图
+### 7.6 Rückverfolgungsansicht
 
-追溯性页面（`/special-characteristics/traceability`）提供从 FMEA → 特殊特性 → 控制计划 → MSA 的端到端追溯链：
+Die Seite Rückverfolgbarkeit (`/special-characteristics/traceability`) bietet die durchgängige Kette FMEA → besonderes Merkmal → Produktionslenkungsplan → MSA:
 
 ```
-DFMEA 失效模式节点
-  └→ 特殊特性 (SC/CC)
-      └→ 控制计划行项 (ControlPlanItem)
-          └→ MSA 研究 (GRG/Linearity/Stability)
+DFMEA Fehlerartknoten
+  └→ Besondere Merkmale (SC/CC)
+      └→ Zeile des Produktionslenkungsplans (ControlPlanItem)
+          └→ MSA Studie (GRG/Linearity/Stability)
 ```
 
-追溯性视图支持：
-- 按产品线筛选
-- 按特性类型（CC/SC）筛选
-- 仅查看安全相关特性
-- 仅查看待审批的安全特性
+Die Rückverfolgungsansicht unterstützt:
+- Filter nach Produktlinie
+- Filter nach Merkmalsart (CC/SC)
+- Nur sicherheitsrelevante Merkmale
+- Nur Sicherheitsmerkmale mit offener Freigabe
 
-### 7.7 特殊特性编码规则
+### 7.7 Nummerierung besonderer Merkmale
 
-系统自动生成编码，格式：`SC-{年份}-{序号}`，例如 `SC-2026-001`。
+Das System erzeugt Codes automatisch im Format `SC-{Jahr}-{Nummer}`, z. B. `SC-2026-001`.
 
-### 7.8 FMEA→控制计划联动
+### 7.8 Kopplung FMEA → Produktionslenkungsplan
 
-特殊特性在 FMEA 和控制计划之间的联动通过以下机制实现：
+Die Kopplung besonderer Merkmale zwischen FMEA und Produktionslenkungsplan erfolgt über:
 
-1. **FMEA 标记**：新来源为 `characteristics[].classification`，旧 Function.classification 仅兼容
-2. **同步到特殊特性**：通过「从 FMEA 同步」功能自动创建/更新 `SpecialCharacteristic` 记录
-3. **控制计划导入**：通过「从 PFMEA 导入」功能，控制计划行项的 `special_class` 字段自动携带 对应特性项的分类标记
-4. **手动关联**：可在特殊特性详情页手动关联控制计划行项（`cp_item_id`）
+1. **FMEA-Kennzeichnung**: neue Quellen über `characteristics[].classification`, das alte Function.classification nur zur Kompatibilität
+2. **Synchronisation zu besonderen Merkmalen**: „Aus FMEA synchronisieren“ legt `SpecialCharacteristic`-Datensätze an bzw. aktualisiert sie automatisch
+3. **Import in den Produktionslenkungsplan**: Bei „Aus PFMEA importieren“ übernimmt das Feld `special_class` der Zeile automatisch die Klassifizierung des zugehörigen Merkmals
+4. **Manuelle Verknüpfung**: In den Details eines besonderen Merkmals kann eine Zeile des Produktionslenkungsplans (`cp_item_id`) manuell verknüpft werden
 
 ---
 
-## 8. 常见问题
+## 8. Häufige Fragen
 
 ### 8.1 FMEA
 
-**Q: FMEA 审批后被退回修改，版本号会变吗？**
+**F: Ändert sich die Versionsnummer, wenn eine freigegebene FMEA zur Überarbeitung zurückgegeben wird?**
 
-A: 审批通过时自动创建版本快照（如 1.0）。退回到 rework 状态后再提交审批，审批通过时会创建新的批准主版本快照（如 2.0）。版本历史可在详情页查看。
+A: Bei der Freigabe entsteht automatisch ein Versions-Snapshot (z. B. 1.0). Nach Rückgabe auf rework und erneuter Freigabe entsteht ein neuer Haupt-Snapshot (z. B. 2.0). Die Versionshistorie ist auf der Detailseite einsehbar.
 
-**Q: 已审批的 FMEA 可以编辑吗？**
+**F: Kann eine freigegebene FMEA bearbeitet werden?**
 
-A: 已审批（approved）的 FMEA 不能直接编辑，需要先将状态退回到 rework，编辑完成后再走审批流程。
+A: Eine freigegebene (approved) FMEA kann nicht direkt bearbeitet werden; sie muss zuerst auf rework zurückgesetzt und nach der Bearbeitung erneut freigegeben werden.
 
-**Q: DFMEA 和 PFMEA 可以关联吗？**
+**F: Können DFMEA und PFMEA verknüpft werden?**
 
-A: PFMEA 创建时可以选择关联的 DFMEA 文档。新来源不会按同名自动建立特殊特性父子关系，已有显式父关系保留。
+A: Beim Anlegen einer PFMEA kann eine DFMEA verknüpft werden. Neue Quellen legen Eltern-Kind-Beziehungen besonderer Merkmale nicht anhand gleicher Namen automatisch an; bestehende ausdrückliche Elternbeziehungen bleiben erhalten.
 
-**Q: AP 值如何计算？**
+**F: Wie wird die AP berechnet?**
 
-A: 系统严格按照 AIAG-VDA FMEA 手册附录 C1.5 的 S×O×D 矩阵计算 Action Priority。S=9-10 时优先级更高，S=1-3 时即使 O 和 D 较高，AP 也不超过 M。具体对照表见 FMEA 编辑器中的 AP 查询功能。
+A: Das System berechnet die Action Priority streng nach der S×O×D-Matrix in Anhang C1.5 des AIAG-VDA-FMEA-Handbuchs. Bei S=9–10 ist die Priorität höher; bei S=1–3 überschreitet die AP selbst bei hohem O und D nicht M. Die vollständige Tabelle zeigt die AP-Abfrage im FMEA-Editor.
 
-### 8.2 控制计划
+### 8.2 Produktionslenkungsplan
 
-**Q: 控制计划只有 draft 和 approved 两个状态吗？**
+**F: Hat der Produktionslenkungsplan nur die Status draft und approved?**
 
-A: 是的。控制计划当前仅支持 `draft` 和 `approved` 两个状态。审批通过后不可再编辑，如需修改需要创建新版本。
+A: Ja. Derzeit gibt es nur `draft` und `approved`. Nach der Freigabe ist keine Bearbeitung mehr möglich; für Änderungen wird eine neue Version angelegt.
 
-**Q: 从 PFMEA 导入后能手动修改行项吗？**
+**F: Können importierte Zeilen manuell geändert werden?**
 
-A: 可以。导入生成的行项标记 `item_source = "fmea"`，但仍然可以手动修改。也可手动添加新行项（`item_source = "manual"`）。
+A: Ja. Importierte Zeilen sind mit `item_source = "fmea"` gekennzeichnet, lassen sich aber manuell ändern. Zusätzliche Zeilen können manuell ergänzt werden (`item_source = "manual"`).
 
-**Q: 审批控制计划时量具验证失败怎么办？**
+**F: Was tun, wenn die Prüfmittelprüfung bei der Freigabe fehlschlägt?**
 
-A: 审批前系统自动检查所有关联量具的状态。如果量具未激活或不在有效校准期内，审批将被拒绝。需要先更新量具校准信息或移除无效量具关联。
+A: Vor der Freigabe prüft das System alle verknüpften Prüfmittel. Ist ein Prüfmittel nicht aktiv oder außerhalb der gültigen Kalibrierung, wird die Freigabe abgelehnt. Zuerst die Kalibrierdaten aktualisieren oder die ungültige Prüfmittelverknüpfung entfernen.
 
-**Q: 控制计划版本和 FMEA 版本如何关联？**
+**F: Wie hängen Versionen von Produktionslenkungsplan und FMEA zusammen?**
 
-A: 文档 source_fmea_version_id 表示全覆盖同步跟踪；逐行 source_characteristic_ref.accepted_source_version_id 表示该行实际接受的批准快照，部分同步时不能用文档字段替代各行基线。
+A: source_fmea_version_id des Dokuments zeigt die vollständig abgedeckte Synchronisationsverfolgung; accepted_source_version_id in der source_characteristic_ref jeder Zeile zeigt den tatsächlich angenommenen freigegebenen Snapshot dieser Zeile. Bei teilweiser Synchronisation ersetzt das Dokumentfeld nicht die Basis der einzelnen Zeilen.
 
 ### 8.3 APQP
 
-**Q: 门径审批时提示"需要关联 DFMEA"怎么办？**
+**F: Bei der Gate-Freigabe erscheint „DFMEA muss verknüpft sein“ – was tun?**
 
-A: 阶段 2 的门径审批要求 `dfmea_id` 不为空。请在项目编辑页面关联一个状态为 approved 的 DFMEA 文档后再提交审批。
+A: Die Gate-Freigabe von Phase 2 verlangt ein nicht leeres `dfmea_id`. Im Projekt eine DFMEA im Status approved verknüpfen und dann erneut einreichen.
 
-**Q: 可以跳过某个阶段吗？**
+**F: Kann eine Phase übersprungen werden?**
 
-A: 不可以。APQP 门径模型要求严格按顺序推进：1 → 2 → 3 → 4 → 5。只有当前阶段审批通过后才能进入下一阶段。
+A: Nein. Das APQP-Gate-Modell verlangt die strikte Reihenfolge 1 → 2 → 3 → 4 → 5. Erst nach Freigabe der aktuellen Phase geht es weiter.
 
-**Q: 已取消的 APQP 项目可以恢复吗？**
+**F: Können abgebrochene APQP-Projekte wiederhergestellt werden?**
 
-A: 目前不支持恢复。取消操作（cancel）是最终状态，仅管理员可执行。建议在取消前确认。
+A: Derzeit nicht. Der Abbruch (cancel) ist ein Endstatus und nur Administratoren vorbehalten. Vor dem Abbruch bitte bestätigen.
 
-**Q: APQP 项目编号格式是什么？**
+**F: Welches Format hat die APQP-Projektnummer?**
 
-A: 系统自动生成，格式为 `APQP-2026-XXX`，其中年份取当前年份，序号自增。
+A: Automatisch erzeugt im Format `APQP-2026-XXX`; das Jahr ist das aktuelle Jahr, die Nummer wird hochgezählt.
 
 ### 8.4 PPAP
 
-**Q: PPAP 审批时提示"存在未批准的必填元素"怎么办？**
+**F: Bei der PPAP-Freigabe erscheint „nicht freigegebene Pflichtelemente vorhanden“ – was tun?**
 
-A: PPAP 审批要求所有 `required=True` 的要素状态为 `approved`。请逐项审查并审批各要素后再提交 PPAP 整体审批。
+A: Die PPAP-Freigabe verlangt, dass alle Elemente mit `required=True` `approved` sind. Die Elemente einzeln prüfen und freigeben, dann die Gesamtfreigabe der PPAP einreichen.
 
-**Q: 被驳回的 PPAP 可以重新提交吗？**
+**F: Kann eine zurückgewiesene PPAP erneut eingereicht werden?**
 
-A: 可以。驳回状态（rejected）的 PPAP 执行 resubmit 操作后回到 under_review 状态，同时 revision（修订版本号）自动 +1。
+A: Ja. Eine PPAP im Status rejected kehrt nach resubmit in den Status under_review zurück, revision (Revisionsnummer) wird automatisch um 1 erhöht.
 
-**Q: 提交等级如何选择？**
+**F: Wie wird die Vorlagestufe gewählt?**
 
-A: 提交等级由客户要求决定。Level 3 是最常见的默认等级（新零件首次提交），Level 1 适用于客户仅要求 PSW 的场景，Level 5 适用于客户书面授权不提交的场景。
+A: Die Vorlagestufe bestimmt der Kunde. Level 3 ist der häufigste Standard (Erstvorlage neuer Teile), Level 1 gilt, wenn der Kunde nur das PSW verlangt, Level 5, wenn der Kunde schriftlich auf eine Einreichung verzichtet.
 
-**Q: PPAP 编号格式是什么？**
+**F: Welches Format hat die PPAP-Nummer?**
 
-A: 系统自动生成，格式为 `PPAP-2026-XXX`。
+A: Automatisch erzeugt im Format `PPAP-2026-XXX`.
 
-### 8.5 特殊特性
+### 8.5 Besondere Merkmale
 
-**Q: severity ≥ 9 的节点标记为安全特性后可以取消吗？**
+**F: Kann die Kennzeichnung als Sicherheitsmerkmal bei Knoten mit severity ≥ 9 wieder aufgehoben werden?**
 
-A: 安全特性（`is_safety_related = true`）不能通过 FMEA 同步自动取消。如果 FMEA 中节点严重度降级（从 ≥9 降至 <9），系统会记录审计日志警告，但不会自动移除安全标记，需人工评估。
+A: Sicherheitsmerkmale (`is_safety_related = true`) werden durch die FMEA-Synchronisation nicht automatisch aufgehoben. Sinkt die Bedeutung eines Knotens in der FMEA (von ≥9 auf <9), protokolliert das System eine Warnung im Audit-Log, entfernt das Sicherheitskennzeichen aber nicht; eine manuelle Bewertung ist nötig.
 
-**Q: 特殊特性的覆盖率矩阵中"未覆盖"意味着什么？**
+**F: Was bedeutet „nicht abgedeckt“ in der Abdeckungsmatrix?**
 
-A: 表示该特殊特性尚未关联到控制计划行项或 MSA 研究。IATF 16949 要求所有特殊特性必须有对应的控制方法和验证手段，覆盖率矩阵帮助识别缺失环节。
+A: Das besondere Merkmal ist noch mit keiner Zeile des Produktionslenkungsplans oder keiner MSA-Studie verknüpft. IATF 16949 verlangt für alle besonderen Merkmale passende Lenkungsmethoden und Nachweise; die Matrix hilft, Lücken zu finden.
 
-**Q: 从 FMEA 同步会覆盖手动创建的特殊特性吗？**
+**F: Überschreibt die Synchronisation aus FMEA manuell angelegte besondere Merkmale?**
 
-A: 不会。同步功能只更新从同一 FMEA 节点来源的已有记录，不会覆盖手动创建的记录。如果 FMEA 中某节点被移除，普通特性会被自动删除，但安全相关特性会被保留并记录警告。
+A: Nein. Die Synchronisation aktualisiert nur vorhandene Datensätze derselben FMEA-Knotenquelle und überschreibt keine manuell angelegten. Wird ein Knoten aus der FMEA entfernt, werden normale Merkmale automatisch gelöscht, sicherheitsrelevante aber mit Warnung erhalten.
 
-**Q: PFMEA 同步的特殊特性为什么会自动关联 DFMEA 特性？**
+**F: Warum werden aus der PFMEA synchronisierte besondere Merkmale automatisch mit DFMEA-Merkmalen verknüpft?**
 
-A: 新结构化来源不按同名自动建立 parent_sc_id；同名不是设计继承证据。已有显式父关系保持，需业务确认真实设计来源。
+A: Neue strukturierte Quellen legen parent_sc_id nicht anhand gleicher Namen an; ein gleicher Name ist kein Beleg für eine Design-Vererbung. Bestehende ausdrückliche Elternbeziehungen bleiben; die tatsächliche Designquelle muss fachlich bestätigt werden.
 
 ---
 
-> **文档路径**：`/docs/modules/planning.md`
-## 结构化特性兼容与验收（2026-11-03）
+> **Dokumentpfad**: `/docs/modules/planning.md`
+## Kompatibilität und Abnahme strukturierter Merkmale (2026-11-03)
 
-Function.characteristics 缺失/null 保留旧自由文本参考提示，不自动转换；显式 [] 是确认无特性，不回退旧字段。每项含稳定 UUID、kind、name、specification、unit、可选 classification、reference、related_product_characteristic_ids。PFMEA 工作要素过程只能关联同工序产品；DFMEA System/Subsystem/Component 真实所属的共享 Process*Function 一律 product。kind 与 CC/SC 独立，不自动赋特殊分类。名称空白反馈必填、持久名称非空；改名不换 ID。
+Fehlt Function.characteristics oder ist es null, bleibt der alte Freitext-Referenzhinweis ohne automatische Umwandlung; ein ausdrückliches [] bestätigt „keine Merkmale“ und fällt nicht auf das alte Feld zurück. Jeder Eintrag enthält stabile UUID, kind, name, specification, unit, optional classification, reference und related_product_characteristic_ids. Prozessmerkmale von PFMEA-Arbeitselementen dürfen nur auf Produkte desselben Arbeitsgangs verweisen; gemeinsame Process*Function, die tatsächlich zu DFMEA System/Subsystem/Component gehören, sind stets product. kind und CC/SC sind unabhängig, eine besondere Klassifizierung wird nicht automatisch vergeben. Leere Namen melden ein Pflichtfeld, persistierte Namen sind nicht leer; Umbenennen ändert die ID nicht.
 
-标准 CP 栏目、分组及结构边枚举不变。未新增 CP Excel/PDF/打印格式；手册／CSR 转换缺口见 [验收基线](../development/characteristic-correction-acceptance.md)。R005 规范缺失及 R006 legacy 双对象只作 warning，不新增审批门禁。本次专项不等于全 AI／PPAP／CSR／scanner／live Neo4j 认证。
+Standardspalten, Gruppierung und Strukturkanten-Enums des Produktionslenkungsplans bleiben unverändert. Es gibt kein neues Excel-/PDF-/Druckformat für Produktionslenkungspläne; Lücken bei der Umwandlung von Handbuch/CSR bleiben offen. Fehlende Spezifikation (R005) und doppelte legacy-Objekte (R006) erzeugen nur warnings, kein neues Freigabe-Gate. Dieser Schwerpunkt ist keine Zertifizierung für KI, PPAP, CSR, Scanner oder Live-Neo4j insgesamt.
 
-### Task11 r1 单位与晚到通知补充
+### Task 11 r1: Einheiten und verspätete Benachrichtigungen
 
-CP 的现有“产品/过程/规格/公差”列呈现对象 specification＋unit，明确单位恰好一次；已经带单位的文字不重复加，None/空白不能被单位补成准则，不自动转换量值。unit-only 变更与明确清空也进入批准快照的同源 import/sync/stale 投影。新自动 SC 使用同一小格式化函数，受审安全材料只提示复核，不自动改写；手工入口遗留缺陷不在此修复。
+Die bestehende CP-Spalte „Produkt/Prozess/Spezifikation/Toleranz“ zeigt specification + unit des Objekts, mit ausdrücklich genau einer Einheit; Text mit bereits enthaltener Einheit erhält keine zweite, None/Leerraum wird nicht durch eine Einheit zu einem Kriterium ergänzt, Mengen werden nicht umgerechnet. Reine Einheitenänderungen und ausdrückliches Leeren gehen ebenfalls in die gleichartige import/sync/stale-Projektion des freigegebenen Snapshots ein. Neue automatische SCs verwenden dieselbe kleine Formatierungsfunktion; geprüftes Sicherheitsmaterial erhält nur einen Prüfhinweis und wird nicht automatisch umgeschrieben; Altfehler der manuellen Einstiege werden hier nicht behoben.
 
-CP worker 不再把已完整处理的同一或更新批准基线重新标 pending。它按 scope→CP parent 顺序互斥，等待后 fresh-row 重读，核对来源/工厂/hash、实际逐行基线与完整覆盖；仅文档指针不够证明完成。部分／未知／真正更新仍保守 needs-update，worker 只通知不改业务字段；此前的直接两阶段／待实现说法是历史，不是当前事实。
-
-
-### 最终评审纠偏（2026-11-07）
-
-- 首次从批准快照仅导入部分特性时，在同一事务持久化 `sync_pending=true`；即使批准事件早于新 CP 且已交付，刷新仍可进入正式同步预览。未导入特性不写逐行 accepted baseline，完整覆盖后才清除 pending。
-- 正式同步中的可应用、无保护/冲突删除候选默认不勾选，但允许用户明确选择后确认；受保护或不适用候选仍禁用。关闭或更换预览上下文会清除本地 busy，旧请求完成不更新新 drawer；旧写入可能已提交，必须重新预览，不表示回滚。
-- 删除功能/结构子树时，先提示仍存过程特性受影响的关联，再确认清理仅指向被删产品特性 UUID 的引用；共享失效/控制节点继续按存活行保护。产品 SC、过程 CC 均合法，相关结构化集合聚合遵循 CC 优先于 SC，不按 kind 丢弃分类；缺失/null 与显式 [] 的兼容权威性不变。
-- DC-DC 草稿示例 CP 的 `source_fmea_node_id` 与 ref.step_id 同为结构工序 `ps_1`，function_id 分别保留 `psf_1` / `wef_1`，accepted source 仍为 null，不伪造审批。SC 自动来源复核使用与抽取相同的规范＋单位投影（规范空时回退 reference），不扩大手工安全特性 API 范围。
-- 常规 pytest 临时 schema fixtures 使用显式 `TEST_DATABASE_URL` 的隔离 `qms_test`，不套用浏览器实例授权规则；专用浏览器仍严格要求双 URL 同一 `127.0.0.1:55432/qms_test`。常规 Playwright discovery 排除 opt-in characteristic spec；专用配置与授权不变。
+Der CP-Worker markiert eine bereits vollständig verarbeitete gleiche oder neuere freigegebene Basis nicht erneut als pending. Er schließt sich in der Reihenfolge scope → CP-Elternzeile gegenseitig aus, liest nach dem Warten frische Zeilen neu und prüft Quelle/Werk/Hash, tatsächliche Basis je Zeile und vollständige Abdeckung; ein Dokumentzeiger allein beweist keinen Abschluss. Teilweise/unbekannte/tatsächlich neuere Stände bleiben konservativ needs-update; der Worker benachrichtigt nur und ändert keine fachlichen Felder. Frühere Aussagen zu einem direkten zweistufigen Ablauf bzw. „noch umzusetzen“ sind historisch und nicht der aktuelle Stand.
 
 
-### 历史来源选择与尚未处理的新批准（2026-11-08）
+### Korrekturen aus der abschließenden Prüfung (2026-11-07)
 
-允许从历史真实批准快照导入/同步；所选版本及逐行实际accepted_source_version_id均如实保留。完成所选历史版本不等于完成当前来源义务：首次导入、正式同步和零候选ACK，在现有scope＋CP/FMEA parent锁内同时检查同源/同工厂最高真实批准版本（批准major、hash/归属、完整accepted coverage；有歧义保守pending）。存在尚未完整接受的新批准时，sync_pending保持true，即使该批准通知早已交付；用户明确预览/完成当前批准目标后可清除，不永久pending、不禁止历史选择、不使用mutable graph冒充批准。
+- Werden beim ersten Import aus einem freigegebenen Snapshot nur einige Merkmale importiert, wird in derselben Transaktion `sync_pending=true` gespeichert; selbst wenn das Freigabeereignis vor dem neuen CP lag und bereits zugestellt wurde, kann nach dem Aktualisieren die formale Synchronisationsvorschau geöffnet werden. Nicht importierte Merkmale schreiben keine accepted-Basis je Zeile; erst bei vollständiger Abdeckung wird pending gelöscht.
+- Anwendbare Löschkandidaten ohne Schutz/Konflikt sind in der formalen Synchronisation standardmäßig nicht ausgewählt, können aber nach ausdrücklicher Auswahl bestätigt werden; geschützte oder nicht anwendbare Kandidaten bleiben deaktiviert. Schließen oder Wechseln des Vorschaukontexts löscht lokales busy; ein Abschluss alter Anfragen aktualisiert den neuen Drawer nicht; alte Schreibvorgänge können bereits committet sein, daher neu voranzeigen – das ist kein Rollback.
+- Beim Löschen eines Funktions-/Struktur-Teilbaums wird zuerst auf betroffene Verknüpfungen weiterhin vorhandener Prozessmerkmale hingewiesen, dann bestätigt, dass nur Referenzen auf UUIDs gelöschter Produktmerkmale bereinigt werden; gemeinsame Fehler-/Maßnahmenknoten bleiben nach überlebenden Zeilen geschützt. Produkt-SC und Prozess-CC sind beide zulässig; die Aggregation zugehöriger strukturierter Mengen folgt CC vor SC und verwirft Klassifizierungen nicht nach kind; die Kompatibilitätsautorität von fehlend/null gegenüber ausdrücklichem [] bleibt.
+- Im DC-DC-Beispielentwurf eines Produktionslenkungsplans sind `source_fmea_node_id` und ref.step_id beide der Strukturarbeitsgang `ps_1`, function_id bleibt `psf_1` / `wef_1`, accepted source ist weiterhin null – eine Freigabe wird nicht vorgetäuscht. Die Quellprüfung automatischer SCs verwendet dieselbe Projektion aus Spezifikation + Einheit wie die Extraktion (bei leerer Spezifikation Rückfall auf reference) und erweitert den Umfang der manuellen Sicherheitsmerkmal-API nicht.
+- Temporäre Schema-Fixtures normaler pytest-Läufe verwenden das isolierte `qms_test` aus ausdrücklichem `TEST_DATABASE_URL` und nicht die Autorisierungsregeln der Browserinstanz; der dedizierte Browser verlangt weiterhin streng dieselbe URL `127.0.0.1:55432/qms_test` für beide Variablen. Die normale Playwright-Discovery schließt die opt-in characteristic-Spec aus; dedizierte Konfiguration und Autorisierung bleiben unverändert.
 
-本次剩余验收脚本修正仅静态/pure/mock/syntax验证：部分导入只选候选表并显式关闭剩余提示；无失效行的工作要素功能通过实际向导编辑；未完成draft先走合法向导完成再进主编辑器删除。既有运行时写入/worker拒绝仍有效，本轮不启动或补跑浏览器门禁。
+
+### Auswahl historischer Quellen und noch nicht verarbeitete neue Freigaben (2026-11-08)
+
+Import und Synchronisation aus historischen, tatsächlich freigegebenen Snapshots sind erlaubt; gewählte Version und tatsächliches accepted_source_version_id je Zeile bleiben wahrheitsgemäß erhalten. Der Abschluss einer gewählten historischen Version erfüllt nicht die aktuelle Quellverpflichtung: Erstimport, formale Synchronisation und ACK ohne Kandidaten prüfen unter den bestehenden scope- sowie CP/FMEA-Elternsperren zugleich die höchste tatsächlich freigegebene Version derselben Quelle/desselben Werks (Hauptversion der Freigabe, Hash/Zugehörigkeit, vollständige accepted-Abdeckung; bei Mehrdeutigkeit konservativ pending). Gibt es eine noch nicht vollständig angenommene neuere Freigabe, bleibt sync_pending true, auch wenn deren Benachrichtigung längst zugestellt ist; nach ausdrücklicher Vorschau/Abschluss des aktuellen Freigabeziels kann es gelöscht werden – kein dauerhaftes pending, kein Verbot historischer Auswahl, kein veränderlicher Graph als vorgetäuschte Freigabe.
+
+Die verbleibenden Korrekturen der Abnahmeskripte dieser Runde sind nur statisch/pure/mock/syntaktisch geprüft: Teilimport wählt nur Kandidatentabellen und schließt ausdrücklich den Hinweis auf verbleibende Punkte; Funktionen von Arbeitselementen ohne Fehlerzeilen werden über echte Assistentenbearbeitung angelegt; unvollständige Entwürfe durchlaufen zuerst regulär den Assistenten und werden dann im Haupteditor gelöscht. Bestehende Ablehnungen von Laufzeitschreibvorgängen/Worker bleiben wirksam; Browser-Gates wurden in dieser Runde weder gestartet noch nachgeholt.
