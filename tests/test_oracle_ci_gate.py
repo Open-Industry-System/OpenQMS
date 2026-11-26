@@ -219,3 +219,41 @@ def test_missing_preview_plan_blocks_publication():
     api.data[f'/git/commits/{SHA}'] = {'parents': [{'sha': BASE}, {'sha': HEAD}]}
     with pytest.raises(ValueError, match='验收计划'):
         gate.verify(api, 42, REPO)
+
+
+@pytest.mark.parametrize('change', ['none', 'wrong-pr', 'symlink', 'changed-merge', 'missing-merge'])
+def test_required_preview_fixture_must_match_head_and_deployed_merge(change):
+    api = API()
+    candidate_run = run()
+    candidate_run['run_attempt'] = 2
+    api.data['/actions/runs/42'] = candidate_run
+    candidate = pr()
+    candidate['body'] = candidate['body'].replace(
+        '### 影响范围', '### 影响范围\n<!-- openqms-preview-fixture: required -->',
+    )
+    api.data['/pulls/7'] = candidate
+    api.data['/git/ref/heads/main'] = {'object': {'sha': BASE}}
+    api.data['/collaborators/alice/permission'] = {'permission': 'write'}
+    api.data['/git/ref/pull/7/merge'] = {'object': {'sha': SHA}}
+    api.data[f'/git/commits/{SHA}'] = {'parents': [{'sha': BASE}, {'sha': HEAD}]}
+    entry = {
+        'path': 'backend/app/preview_fixtures/pr_7.py', 'type': 'blob',
+        'mode': '100644', 'size': 100, 'sha': 'd' * 40,
+    }
+    head_entry = entry.copy()
+    merge_entry = entry.copy()
+    if change == 'wrong-pr':
+        head_entry['path'] = 'backend/app/preview_fixtures/pr_8.py'
+    elif change == 'symlink':
+        head_entry['mode'] = '120000'
+    elif change == 'changed-merge':
+        merge_entry['sha'] = 'e' * 40
+    api.data[f'/git/trees/{HEAD}?recursive=1'] = {'truncated': False, 'tree': [head_entry]}
+    api.data[f'/git/trees/{SHA}?recursive=1'] = {
+        'truncated': False, 'tree': [] if change == 'missing-merge' else [merge_entry],
+    }
+    if change == 'none':
+        assert gate.verify(api, 42, REPO)['sha'] == SHA
+    else:
+        with pytest.raises(ValueError, match='专项种子'):
+            gate.verify(api, 42, REPO)

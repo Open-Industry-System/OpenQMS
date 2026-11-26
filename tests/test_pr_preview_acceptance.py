@@ -713,3 +713,50 @@ def test_reconcile_reports_wrong_lease_and_real_item_in_template(shared_receipt_
     assert checks[-1][:2] == (m.ACCEPT, 'pending')
     assert '测试轮次不匹配' in checks[-1][2]
     assert any('report-read: <通过、失败或受阻>' in entry for entry in summary)
+
+
+FIXTURE_DECLARATION = '<!-- openqms-preview-fixture: required -->'
+PLAN_WITH_FIXTURE = BODY.replace('### 影响范围', f'### 影响范围\n{FIXTURE_DECLARATION}')
+
+
+@pytest.mark.parametrize('body', [
+    PLAN_WITH_FIXTURE.replace('required', 'yes'),
+    PLAN_WITH_FIXTURE.replace(FIXTURE_DECLARATION, f'{FIXTURE_DECLARATION}\n{FIXTURE_DECLARATION}'),
+    BODY.replace('### 权限与回归', f'### 权限与回归\n{FIXTURE_DECLARATION}'),
+])
+def test_fixture_declaration_must_be_single_and_under_scope(body):
+    with pytest.raises(ValueError, match='声明专项测试数据'):
+        m.parse_plan(body)
+
+
+def test_optional_fixture_uses_existing_plan_without_api_calls():
+    assert m.validate_plan(None, {'body': BODY}) == m.test_plan(BODY)
+    explicit = PLAN_WITH_FIXTURE.replace('required', 'none')
+    assert m.validate_plan(None, {'body': explicit}) == m.test_plan(explicit)
+    assert m.test_plan(PLAN_WITH_FIXTURE) != m.test_plan(explicit)
+
+
+def test_missing_current_pr_fixture_fails_plan_status(monkeypatch):
+    head = 'a' * 40
+    pr = dict(number=7, head={'sha': head}, body=PLAN_WITH_FIXTURE)
+    monkeypatch.setenv('ORACLE_SHARED_TEST_ENABLED', 'true')
+
+    class Fake:
+        repo = 'owner/OpenQMS'
+
+        def __init__(self):
+            self.statuses = []
+
+        def get(self, path):
+            assert path == f'/git/trees/{head}?recursive=1'
+            # A different PR's fixture must not satisfy this PR's plan.
+            return {'truncated': False, 'tree': [{'path': 'backend/app/preview_fixtures/pr_8.py'}]}
+
+        def status(self, sha, context, state, message):
+            self.statuses.append((sha, context, state, message))
+
+    api = Fake()
+    m.reconcile(api, pr, [])
+    sha, context, state, message = api.statuses[-1]
+    assert (sha, context, state) == (head, m.PLAN, 'failure')
+    assert '缺少专项种子文件 backend/app/preview_fixtures/pr_7.py' in message

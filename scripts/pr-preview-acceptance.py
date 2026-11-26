@@ -54,6 +54,7 @@ LEGACY_HEADER = ('检查项', '操作步骤', '预期结果')
 ITEM_HEADER = ('编号', '检查项', '环境', '角色', '场景', '操作步骤', '预期结果')
 PUBLIC_SCENARIOS = {'read-only'}
 SHARED_SCENARIOS = {'write', 'd4-deliver', 'd4-revoke'}
+FIXTURE_DECLARATION = re.compile(r'<!-- openqms-preview-fixture: (none|required) -->')
 RESULT_LINE = re.compile(r'([a-z][a-z0-9-]{0,39})\s*[:：]\s*(通过|失败|受阻)')
 
 
@@ -69,6 +70,7 @@ class AcceptancePlan(NamedTuple):
     digest: str
     items: tuple[AcceptanceItem, ...]
     classified: bool
+    fixture_required: bool
 
 
 def parse_plan(body):
@@ -80,7 +82,12 @@ def parse_plan(body):
     sections = re.split(r'^### (影响范围|验收步骤|权限与回归)\s*$', plan, flags=re.M)
     if len(sections) != 7 or sections[1::2] != ['影响范围', '验收步骤', '权限与回归']:
         raise ValueError('验收计划须包含影响范围、验收步骤、权限与回归')
-    if any(len(sections[i].strip()) < 8 for i in [2, 6]):
+    declarations = FIXTURE_DECLARATION.findall(sections[2])
+    if plan.count('<!-- openqms-preview-fixture') != len(declarations) or len(declarations) > 1:
+        raise ValueError('请在影响范围内使用 PR 模板声明专项测试数据，且只声明一次')
+    fixture_required = declarations == ['required']
+    scope = FIXTURE_DECLARATION.sub('', sections[2])
+    if len(scope.strip()) < 8 or len(sections[6].strip()) < 8:
         raise ValueError('影响范围和权限与回归须说明具体检查内容')
     rows = [
         tuple(cell.strip() for cell in line.strip().strip('|').split('|'))
@@ -98,7 +105,7 @@ def parse_plan(body):
     if rows[0] == LEGACY_HEADER:
         if any(len(row[0]) < 2 for row in rows[2:]):
             raise ValueError('每条验收步骤都须填写检查项')
-        return AcceptancePlan(digest, (), False)
+        return AcceptancePlan(digest, (), False, fixture_required)
 
     items = []
     ids = set()
@@ -113,13 +120,41 @@ def parse_plan(body):
             raise ValueError('验收项环境、角色和场景不匹配，请使用 PR 模板中的组合')
         ids.add(item_id)
         items.append(AcceptanceItem(item_id, title, environment, role, scenario))
-    return AcceptancePlan(digest, tuple(items), True)
+    return AcceptancePlan(digest, tuple(items), True, fixture_required)
 
 
 def test_plan(body):
     # The existing deploy authorization continues to accept valid legacy plans.
     # Human acceptance separately requires every item to declare its environment.
     return parse_plan(body).digest
+
+
+def validate_plan(api, pr, *, merge_sha=None):
+    plan = parse_plan(pr.get('body'))
+    if not plan.fixture_required:
+        return plan.digest
+
+    number = pr['number']
+    if type(number) is not int or number <= 0:
+        raise ValueError('专项测试数据缺少有效 PR 编号')
+    path = f'backend/app/preview_fixtures/pr_{number}.py'
+
+    def fixture_blob(sha, version):
+        if not re.fullmatch('[0-9a-f]{40}', sha or ''):
+            raise ValueError('专项测试数据缺少有效提交版本')
+        listing = api.get(f'/git/trees/{sha}?recursive=1')
+        if listing.get('truncated') is not False:
+            raise ValueError('GitHub 文件列表不完整，无法确认专项测试数据')
+        for entry in listing['tree']:
+            if (entry['path'] == path and entry['type'] == 'blob'
+                    and entry['mode'] in {'100644', '100755'} and entry['size'] > 0):
+                return entry['sha']
+        raise ValueError(f'{version}缺少专项种子文件 {path}')
+
+    head_blob = fixture_blob(pr['head']['sha'], '当前 PR 提交')
+    if merge_sha is not None and fixture_blob(merge_sha, '待部署版本') != head_blob:
+        raise ValueError(f'待部署版本的专项种子与当前 PR 不一致：{path}')
+    return plan.digest
 
 
 def confirmation_commands(lines):
@@ -618,14 +653,14 @@ def reconcile(api, pr, summary):
         waiting += f'预期地址：{preview_url(pr["number"], False)}\n\n'
     waiting += f'[CI 检查](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
     try:
-        digest = test_plan(pr.get('body'))
+        digest = validate_plan(api, pr)
     except ValueError as error:
         api.status(sha, PLAN, 'failure', str(error))
         summary.append(f'PR #{pr["number"]}: {error}')
         if not shared:
             api.notice(pr['number'], waiting)
         return
-    api.status(sha, PLAN, 'success', '影响范围、操作步骤、预期结果和权限回归检查齐全')
+    api.status(sha, PLAN, 'success', '验收计划齐全，专项种子文件（如需）已核对')
     if shared and (released := shared_release_marker(api, pr, digest)):
         reason = '本轮测试位已清理，等待重新部署后验收'
         if released['outcome'] == 'passed':
