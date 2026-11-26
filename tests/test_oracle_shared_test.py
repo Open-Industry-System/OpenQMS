@@ -149,8 +149,9 @@ def test_fixed_health_rejects_success_from_wrong_pr_or_origin(monkeypatch, trans
         'X-OpenQMS-Test-PR': '46',
         'X-OpenQMS-Test-Version': slot['merge'],
     }
-    def open_health(url, timeout):
-        assert url == health_url
+    def open_health(request, timeout):
+        assert request.full_url == health_url
+        assert request.get_header('User-agent') == 'OpenQMS-Preview-Health/1.0'
         return nullcontext(response)
 
     monkeypatch.setattr(client['urllib'].request, 'urlopen', open_health)

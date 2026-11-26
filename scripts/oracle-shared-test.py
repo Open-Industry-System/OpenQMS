@@ -121,10 +121,13 @@ def shared_origin():
 
 def public_health(slot):
     health_url = shared_origin() + '/api/health'
+    request = urllib.request.Request(
+        health_url, headers={'User-Agent': 'OpenQMS-Preview-Health/1.0'},
+    )
     until = time.monotonic() + 90
     while True:
         try:
-            with urllib.request.urlopen(health_url, timeout=15) as response:
+            with urllib.request.urlopen(request, timeout=15) as response:
                 if (response.url != health_url
                         or response.headers.get('X-OpenQMS-Test-PR') != str(slot['pr'])
                         or response.headers.get('X-OpenQMS-Test-Version') != slot['merge']
