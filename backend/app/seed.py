@@ -4,6 +4,7 @@ Run: docker compose exec backend python -m app.seed
 """
 import argparse
 import asyncio
+import os
 import secrets
 import uuid
 from datetime import UTC, date, datetime, timedelta
@@ -22,6 +23,7 @@ from app.models.fmea import FMEADocument
 from app.models.management_review import ManagementReview, ReviewOutput
 from app.models.role import RoleDefinition, UserProductLine
 from app.models.user import User
+from app.preview_fixtures import preview_pr_from_env, seed_preview_fixture
 
 # Stable IDs make the simulated DC-DC example traceable without treating it as
 # an accepted production source.  The two characteristics are deliberately
@@ -219,7 +221,7 @@ SAMPLE_DFMEA_GRAPH = {
 }
 
 
-async def seed_supplier_risk_configs(db, factory_id):
+async def seed_supplier_risk_configs(db, factory_id, *, commit: bool = True):
     """Seed default supplier risk rule configs if not present."""
     from sqlalchemy import select
 
@@ -284,7 +286,10 @@ async def seed_supplier_risk_configs(db, factory_id):
                 factory_id=factory_id,
                 updated_by=admin.user_id,
             ))
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
 
 
 async def seed_supply_chain_risk_snapshots(db):
@@ -1686,7 +1691,7 @@ def print_seed_summary(*, print_credentials: bool) -> None:
         )
 
 
-async def seed(*, print_credentials: bool = True):
+async def seed(*, print_credentials: bool = True, preview_pr: int | None = None):
     async with async_session() as db:
         # ─── Seed roles if missing (single-tenant mode) ───
         from app.models.role import RoleDefinition, RolePermission
@@ -1802,6 +1807,7 @@ async def seed(*, print_credentials: bool = True):
                            fmea1.fmea_id if fmea1 else None,
                            dfmea_id=dcdc_dfmea_id)
 
+            await seed_preview_fixture(db, preview_pr)
             await db.commit()
             print("Phase 2 seed data created successfully!")
             return
@@ -2444,7 +2450,8 @@ async def seed(*, print_credentials: bool = True):
         await seed_all_permissions(db)
 
         # ─── Supplier risk default configs ───
-        await seed_supplier_risk_configs(db, default_factory.id)
+        # Keep a new preview database empty if its fixture or later seed steps fail.
+        await seed_supplier_risk_configs(db, default_factory.id, commit=preview_pr is None)
 
         # ─── Supply chain risk map snapshots ───
         await seed_supply_chain_risk_snapshots(db)
@@ -2606,6 +2613,7 @@ async def seed(*, print_credentials: bool = True):
             dfmea_id=dcdc_dfmea_id,
         )
 
+        await seed_preview_fixture(db, preview_pr)
         await db.commit()
 
     print_seed_summary(print_credentials=print_credentials)
@@ -2623,4 +2631,5 @@ def parse_args(argv: list[str] | None = None):
 
 if __name__ == "__main__":
     args = parse_args()
-    asyncio.run(seed(print_credentials=not args.no_print_credentials))
+    preview_pr = preview_pr_from_env(os.environ) if args.no_print_credentials else None
+    asyncio.run(seed(print_credentials=not args.no_print_credentials, preview_pr=preview_pr))
