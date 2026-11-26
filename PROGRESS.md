@@ -28,7 +28,7 @@
 - R5 (D5-Vorschläge mit Modellausgang): echte LOCAL-/CLOUD-Modellversuche und native macOS-Abnahme stehen aus; Linux-Sandbox nicht umgesetzt.
 - Agent-Basis: Embedding-Worker für `agent_memory`, Kompatibilität alter Audit-Aufrufe mit zufälliger `record_id`, echte Mehrwerkzeug-LLM-Schleife, vollständiges Anthropic-`tool_result`-Shaping.
 - Bekannte Lücken: Testabdeckung einzelner Altmodule (`factory_id`-Fixtures); Login-Rate-Limit pro Prozess nicht replikaübergreifend; Redis ohne Cache-Logik; Frontend-Bundle ~5,5 MB ohne Code-Splitting; überlappende Alembic-Nummern.
-- Restliche chinesische Inhalte außerhalb von `backend/`/`frontend/`: Persona-Dateien unter `Agents/`, `.superpowers/` und `TEMP-openai-migration-ledger.md`.
+- Restliche chinesische Inhalte außerhalb von `backend/`/`frontend/`: nur Persona-Dateien unter `Agents/` (nicht Teil des Produkts).
 
 ## Nächste Schritte
 
