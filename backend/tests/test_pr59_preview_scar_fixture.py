@@ -4,6 +4,7 @@ from sqlalchemy import func, select
 from app.core.factory_scope import get_user_product_line_codes
 from app.models.role import RoleDefinition
 from app.models.supplier import Supplier, SupplierSCAR
+from app.models.supplier_risk import SupplierRiskConfig
 from app.models.user import User
 from app.preview_fixtures.pr_59 import (
     LINE_A,
@@ -15,7 +16,7 @@ from app.preview_fixtures.pr_59 import (
     seed,
 )
 from app.services.supply_chain_risk_map.aggregator import aggregate_supply_chain_metrics
-from app.services.supply_chain_risk_map.service import current_period
+from app.services.supply_chain_risk_map.service import current_period, get_heatmap_data
 
 
 @pytest.mark.requires_db
@@ -38,6 +39,12 @@ async def test_pr59_scar_fixture_cases_are_repeatable_and_manager_can_select_bot
         factory_id=default_factory.id,
     )
     db.add(manager)
+    await db.flush()
+    db.add(SupplierRiskConfig(
+        rule_id="R04", category="quality", weight=10, enabled=True,
+        thresholds={"open_days_limit": 30}, factory_id=default_factory.id,
+        updated_by=manager.user_id,
+    ))
     await db.flush()
 
     await seed(db)
@@ -65,3 +72,14 @@ async def test_pr59_scar_fixture_cases_are_repeatable_and_manager_can_select_bot
     assert line_b[suppliers[LINE_SUPPLIER]]["open_scar_count"] == 2
     assert line_a[suppliers[MONTH_END_SUPPLIER]]["open_scar_count"] == 0
     assert line_a[suppliers[NEXT_MONTH_SUPPLIER]]["open_scar_count"] == 1
+
+    for line, expected in (
+        (LINE_A, {LINE_SUPPLIER: 1, MONTH_END_SUPPLIER: 0, NEXT_MONTH_SUPPLIER: 1}),
+        (LINE_B, {LINE_SUPPLIER: 2}),
+    ):
+        result = await get_heatmap_data(db, line, period)
+        counts = {
+            row.supplier_name: next(cell.value for cell in row.cells if cell.key == "open_scar_count")
+            for row in result.rows
+        }
+        assert {supplier_no: counts[SUPPLIERS[supplier_no]] for supplier_no in expected} == expected

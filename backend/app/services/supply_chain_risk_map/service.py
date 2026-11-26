@@ -82,11 +82,13 @@ async def generate_snapshot(
     product_line_code: Optional[str],
     period: str,
     scope=None,
+    *,
+    commit: bool = True,
 ) -> int:
     """Calculate scores, aggregate metrics, normalize, and UPSERT snapshots.
 
     Returns number of snapshots created/updated.
-    Only allowed for the current period.
+    Only allowed for the current period. Use commit=False inside a seed transaction.
     """
     if period != current_period():
         raise ValueError(f"Cannot generate snapshot for {period}: only current period {current_period()} is allowed")
@@ -167,7 +169,8 @@ async def generate_snapshot(
         )
         count += 1
 
-    await db.commit()
+    if commit:
+        await db.commit()
     return count
 
 

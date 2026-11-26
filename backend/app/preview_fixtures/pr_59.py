@@ -7,10 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.deps import RequestScope
+from app.core.factory_scope import FactoryScope, ProductLineScope
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition, UserProductLine
 from app.models.supplier import Supplier, SupplierSCAR
 from app.models.user import User
+from app.services.supply_chain_risk_map.service import current_period, generate_snapshot
 
 LINE_A = "PR59-A"
 LINE_B = "PR59-B"
@@ -28,8 +31,8 @@ SUPPLIERS = {
 async def seed(db: AsyncSession) -> None:
     """Add the cases to the seeded Manager's factory without resetting existing rows."""
     manager = (
-        await db.execute(
-            select(User.user_id, User.factory_id)
+        await db.scalars(
+            select(User)
             .join(RoleDefinition, User.role_id == RoleDefinition.id)
             .where(User.username == "manager", RoleDefinition.role_key == "manager")
         )
@@ -103,3 +106,15 @@ async def seed(db: AsyncSession) -> None:
         ])
         .on_conflict_do_nothing(index_elements=[SupplierSCAR.scar_no])
     )
+
+    # The risk map reads snapshots, so prepare the same output the browser's
+    # refresh action generates while the preview seed transaction is still open.
+    scope = RequestScope(
+        factory_scope=FactoryScope([manager.factory_id], manager.factory_id),
+        effective_factory_id=manager.factory_id,
+        pl_scope=ProductLineScope("EXPLICIT", [LINE_A, LINE_B]),
+        user=manager,
+    )
+    period = current_period()
+    for line in (LINE_A, LINE_B):
+        await generate_snapshot(db, line, period, scope=scope, commit=False)
