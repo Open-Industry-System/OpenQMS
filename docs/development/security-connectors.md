@@ -78,14 +78,22 @@ Bearer、API key、Basic 的用户名和密码均受此约束。重定向保持�
 或环境补出隐藏密钥。LLM 与 embedding 均适用，embedding 的 LLM key fallback
 也只能来自本次显式输入。测试结果会提示重新输入，不会保存测试值。
 
-保存 AI 配置时，对会消费密钥的 provider，变更有效 provider/origin 必须重新输入
-对应密钥；检查包含 embedding provider、base URL 和 API key 对 LLM 设置的
-fallback。原目标的掩码保存继续保留密钥；不使用 API key 的本地 provider 可正常
-配置。API 返回可理解的 400，验证在任何配置写入或 provider 重建前完成。
+保存 AI 配置时，同时校验有效 provider/origin 和密钥来源（主模型或向量字段、
+数据库或环境）。变更有效 provider/origin 必须重输对应密钥；地址不变但改用另一个
+隐藏凭据时，也只允许复用该凭据已经服务的同源目标。例如，清空向量独立 Key 后
+启用跨源的主模型 Key，或启用此前未生效的环境 Key，都需要明确重输。
+
+有效目标包含 SDK 的 `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` 默认地址；实际使用的 SDK 空字符串
+环境地址会被拒绝。E2E 隐式 Hash 不消费 Key，因此不会建立可供后续复用的旧绑定。
+
+已生效的同源主模型 Key 可继续供向量服务复用，原目标的掩码保存继续保留独立
+密钥；不使用 API key 的本地 provider 可正常配置。API 返回可理解的 400，验证在
+任何配置写入、审计或 provider 重建前完成。
 
 ## 验证入口
 
-纯隔离回归 `backend/tests/test_connector_security.py` 使用合成密钥、内存 Fernet、
+纯隔离回归 `backend/tests/test_ai_credential_binding.py` 验证保存时的凭据来源与目标绑定；
+`backend/tests/test_connector_security.py` 使用合成密钥、内存 Fernet、
 替代 DNS 答案和 HTTPX MockTransport，验证原目标发送、目标重绑拒绝、legacy
 响应脱敏、Host/TLS SNI、重试固定 IP 与重定向拒绝，不访问真实 provider。
 生产 env 回归位于 `test_production_compose_wrapper.py` 和 `test_init_production_env.py`。

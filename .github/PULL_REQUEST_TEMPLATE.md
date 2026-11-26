@@ -4,6 +4,8 @@
 
 <!-- preview-test-plan:start -->
 ### 影响范围
+<!-- openqms-preview-fixture: none -->
+<!-- 需要专项测试数据时，将上一行的 none 改为 required，并提交 backend/app/preview_fixtures/pr_<PR编号>.py。验收步骤注明样本名称。 -->
 请填写：受影响的页面、角色、业务流程及不涉及的范围。
 
 ### 验收步骤

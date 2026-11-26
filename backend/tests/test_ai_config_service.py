@@ -11,7 +11,9 @@ Covers:
 """
 import uuid
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from sqlalchemy import select
 
@@ -170,3 +172,46 @@ async def test_update_ai_config_writes_audit_log_without_raw_keys(db, admin_user
     audit_text = repr(changed)
     assert real_key not in audit_text, "raw old API key leaked into AuditLog"
     assert new_key not in audit_text, "raw new API key leaked into AuditLog"
+
+
+@pytest.mark.parametrize("model_key_source", ["db", "env"])
+async def test_cross_origin_key_source_switch_preserves_database_and_audit(
+    db, admin_user, monkeypatch, model_key_source
+):
+    environment = AIConfigUpdate().model_dump()
+    if model_key_source == "env":
+        environment["llm_api_key"] = "synthetic-environment-model-key"
+    monkeypatch.setattr(ai_config_service, "_env_default", environment.__getitem__)
+    values = {
+        "llm_provider": "openai",
+        "llm_api_key": "synthetic-model-key" if model_key_source == "db" else "",
+        "llm_base_url": "https://model.example/v1",
+        "embedding_provider": "openai",
+        "embedding_api_key": "synthetic-vector-key",
+        "embedding_base_url": "https://vectors.example/v1",
+    }
+    for key, value in values.items():
+        await _seed_setting(db, key, value)
+
+    async def snapshot():
+        rows = (await db.scalars(select(SystemSetting))).all()
+        audits = (await db.scalars(select(AuditLog).where(
+            AuditLog.table_name == "system_settings",
+            AuditLog.operated_by == admin_user.user_id,
+        ))).all()
+        return {row.key: row.value for row in rows}, len(audits)
+
+    before = await snapshot()
+    update = _make_update(
+        llm_base_url=values["llm_base_url"],
+        embedding_provider="openai",
+        embedding_base_url=values["embedding_base_url"],
+        embedding_api_key="",
+    )
+    with patch.object(ai_config_service, "_rebuild_providers", new_callable=AsyncMock) as rebuild:
+        with pytest.raises(ValueError, match="credential source.*re-entry"):
+            await update_ai_config(db, update, admin_user.user_id, SimpleNamespace())
+        rebuild.assert_not_awaited()
+
+    await db.flush()
+    assert await snapshot() == before

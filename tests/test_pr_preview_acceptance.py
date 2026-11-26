@@ -352,8 +352,10 @@ def shared_receipt_api():
                 return self.timeline
             pytest.fail(f'unexpected API request: {path}')
 
-        def notice(self, number, body):
+        def notice(self, number, body, create=True, *, replace_if=None):
             assert number == 45
+            if replace_if is not None and not any(replace_if(text) for text in m.bot_notices(self, number)):
+                return
             self.notices.append(body)
             self.comments = [c for c in self.comments if c['user']['login'] != 'github-actions[bot]']
             self.comments.append(dict(user=dict(login='github-actions[bot]', type='Bot'), body=body))
@@ -713,3 +715,127 @@ def test_reconcile_reports_wrong_lease_and_real_item_in_template(shared_receipt_
     assert checks[-1][:2] == (m.ACCEPT, 'pending')
     assert '测试轮次不匹配' in checks[-1][2]
     assert any('report-read: <通过、失败或受阻>' in entry for entry in summary)
+
+
+FIXTURE_DECLARATION = '<!-- openqms-preview-fixture: required -->'
+PLAN_WITH_FIXTURE = BODY.replace('### 影响范围', f'### 影响范围\n{FIXTURE_DECLARATION}')
+
+
+@pytest.mark.parametrize('body', [
+    PLAN_WITH_FIXTURE.replace('required', 'yes'),
+    PLAN_WITH_FIXTURE.replace(FIXTURE_DECLARATION, f'{FIXTURE_DECLARATION}\n{FIXTURE_DECLARATION}'),
+    BODY.replace('### 权限与回归', f'### 权限与回归\n{FIXTURE_DECLARATION}'),
+])
+def test_fixture_declaration_must_be_single_and_under_scope(body):
+    with pytest.raises(ValueError, match='声明专项测试数据'):
+        m.parse_plan(body)
+
+
+def test_optional_fixture_uses_existing_plan_without_api_calls():
+    assert m.validate_plan(None, {'body': BODY}) == m.test_plan(BODY)
+    explicit = PLAN_WITH_FIXTURE.replace('required', 'none')
+    assert m.validate_plan(None, {'body': explicit}) == m.test_plan(explicit)
+    assert m.test_plan(PLAN_WITH_FIXTURE) != m.test_plan(explicit)
+
+
+def test_missing_current_pr_fixture_fails_plan_status(monkeypatch):
+    head = 'a' * 40
+    pr = dict(number=7, head={'sha': head}, merge_commit_sha='b' * 40, body=PLAN_WITH_FIXTURE)
+    monkeypatch.setenv('ORACLE_SHARED_TEST_ENABLED', 'true')
+
+    class Fake:
+        repo = 'owner/OpenQMS'
+
+        def __init__(self):
+            self.statuses = []
+
+        def get(self, path):
+            assert path == f'/git/trees/{head}?recursive=1'
+            # A different PR's fixture must not satisfy this PR's plan.
+            return {'truncated': False, 'tree': [{'path': 'backend/app/preview_fixtures/pr_8.py'}]}
+
+        def pages(self, path):
+            assert path == '/issues/7/comments'
+            return []
+
+        def status(self, sha, context, state, message):
+            self.statuses.append((sha, context, state, message))
+
+    api = Fake()
+    m.reconcile(api, pr, [])
+    sha, context, state, message = api.statuses[-1]
+    assert (sha, context, state) == (head, m.PLAN, 'failure')
+    assert '缺少专项种子文件 backend/app/preview_fixtures/pr_7.py' in message
+
+
+@pytest.mark.parametrize('change', ['new-head', 'new-merge', 'new-plan', 'invalid-plan'])
+def test_shared_reconcile_replaces_old_ready_notice_with_waiting(monkeypatch, shared_receipt_api, change):
+    monkeypatch.setenv('ORACLE_SHARED_TEST_ENABLED', 'true')
+    api = shared_receipt_api
+    digest = api.receipt['plan']
+    m.shared_test_ready_notice(api, api.pr, m.publication(api, api.pr), digest)
+    assert '/preview-accept' in api.notices[-1]
+
+    if change == 'new-head':
+        api.pr['head']['sha'] = 'd' * 40
+        api.pr['merge_commit_sha'] = 'e' * 40
+    elif change == 'new-merge':
+        api.pr['merge_commit_sha'] = 'e' * 40
+    elif change == 'new-plan':
+        api.pr['body'] = SHARED_BODY.replace('刷新后', '重新登录后')
+    else:
+        api.pr['body'] = 'missing plan'
+
+    summary = []
+    m.reconcile(api, api.pr, summary)
+    assert len(api.notices) == 2
+    waiting = api.notices[-1]
+    assert '等待 CI 与预览部署' in waiting
+    assert api.pr['head']['sha'] in waiting
+    assert '/preview-accept' not in waiting
+    assert '测试环境已就绪' not in waiting
+    assert 'check' in waiting
+    assert dict(api.statuses)[m.ACCEPT] == 'pending'
+
+    m.reconcile(api, api.pr, [])
+    assert len(api.notices) == 2
+
+    if change == 'new-head':
+        api.receipt.update(head=api.pr['head']['sha'], sha=api.pr['merge_commit_sha'], queue_lease='f' * 32)
+        m.shared_test_ready_notice(api, api.pr, m.publication(api, api.pr), digest)
+        notice = api.notices[-1]
+        assert '测试环境已就绪' in notice
+        assert '/preview-accept ' + api.pr['head']['sha'] in notice
+        assert 'f' * 32 in notice
+
+
+def test_waiting_update_does_not_replace_a_concurrent_ready_comment(monkeypatch, shared_receipt_api):
+    api = shared_receipt_api
+    digest = api.receipt['plan']
+    old = m.ready_notice(api.pr, m.publication(api, api.pr, shared=True), digest)
+    api.pr['head']['sha'] = 'd' * 40
+    api.pr['merge_commit_sha'] = 'e' * 40
+    api.receipt.update(head=api.pr['head']['sha'], sha=api.pr['merge_commit_sha'], queue_lease='f' * 32)
+    new = m.ready_notice(api.pr, m.publication(api, api.pr, shared=True), digest)
+
+    def bot_comment(body):
+        return dict(id=8, user=dict(login='github-actions[bot]', type='Bot'), body=body)
+
+    pages = iter([[bot_comment(old)], [bot_comment(new)]])
+    monkeypatch.setenv('GITHUB_REPOSITORY', api.repo)
+    real_api = m.API()
+    monkeypatch.setattr(real_api, 'pages', lambda _: next(pages))
+    monkeypatch.setattr(m.subprocess, 'run', lambda *args, **kw: pytest.fail('unexpected comment write'))
+
+    m.invalidate_shared_notice(real_api, api.pr, digest, 'waiting')
+
+
+def test_waiting_update_does_not_replace_current_deployment(monkeypatch, shared_receipt_api):
+    monkeypatch.setenv('ORACLE_SHARED_TEST_ENABLED', 'true')
+    monkeypatch.setenv('GITHUB_RUN_ID', '42')
+    api = shared_receipt_api
+    api.run['status'] = 'in_progress'
+    m.deployment_notice(api, api.pr['number'], api.pr['merge_commit_sha'], 'started', shared=True)
+    m.reconcile(api, api.pr, [])
+    assert len(api.notices) == 1
+    assert '测试环境正在部署' in api.notices[0]

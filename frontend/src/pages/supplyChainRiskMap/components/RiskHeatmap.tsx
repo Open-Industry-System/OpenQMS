@@ -1,113 +1,122 @@
-import React, { useMemo } from "react";
-import ReactECharts from "echarts-for-react";
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import type { HeatmapResponse, HeatmapColumn, HeatmapCell } from "../../../types";
+import "./RiskHeatmap.css";
 
 interface RiskHeatmapProps {
   data: HeatmapResponse;
+  selectedSupplierIds?: readonly string[];
   onSupplierClick?: (supplierId: string) => void;
 }
 
-const RISK_COLORS: Record<string, string> = {
-  low: "#52c41a",
-  medium: "#faad14",
-  high: "#fa8c16",
-  critical: "#f5222d",
-};
+const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 
-function getCellColor(cell: HeatmapCell, col: HeatmapColumn): string {
-  if (col.key === "risk_score" && cell.level) {
-    return RISK_COLORS[cell.level] || "#d9d9d9";
-  }
-  if (cell.risk_index == null) return "#f5f5f5";
-  if (col.polarity === "lower_is_risk") {
-    if (cell.risk_index <= 30) return "#52c41a";
-    if (cell.risk_index <= 60) return "#faad14";
-    return "#f5222d";
-  }
-  if (cell.risk_index <= 30) return "#52c41a";
-  if (cell.risk_index <= 60) return "#faad14";
-  if (cell.risk_index <= 80) return "#fa8c16";
-  return "#f5222d";
+function getCellTone(cell: HeatmapCell | undefined, column: HeatmapColumn) {
+  if (cell?.value == null) return "missing";
+  if (column.polarity === "neutral_exposure") return "neutral";
+  const level = RISK_LEVELS.find((risk) => risk === cell.level);
+  if (column.key === "risk_score" && level) return level;
+  if (cell.risk_index == null) return "neutral";
+  if (cell.risk_index <= 30) return "low";
+  if (cell.risk_index <= 60) return "medium";
+  if (column.polarity !== "lower_is_risk" && cell.risk_index <= 80) return "high";
+  return "critical";
 }
 
-const RiskHeatmap: React.FC<RiskHeatmapProps> = ({ data, onSupplierClick }) => {
-  const { t } = useTranslation("supplyChainRiskMap");
-
-  const option = useMemo(() => {
-    const COLUMN_LABELS: Record<string, string> = {
-      risk_score: t("heatmap.columns.risk_score"),
-      quality_score: t("heatmap.columns.quality_score"),
-      delivery_score: t("heatmap.columns.delivery_score"),
-      compliance_score: t("heatmap.columns.compliance_score"),
-      erp_on_time_rate: t("heatmap.columns.erp_on_time_rate"),
-      purchase_amount_pct: t("heatmap.columns.purchase_amount_pct"),
-      open_scar_count: t("heatmap.columns.open_scar_count"),
-      ppm_value: t("heatmap.columns.ppm_value"),
-    };
-
-    const yData = data.rows.map((r) => r.supplier_name);
-    const xData = data.columns.map((c) => COLUMN_LABELS[c.key] ?? c.label);
-
-    const seriesData: Array<[number, number, number, string]> = [];
-    data.rows.forEach((row, yIdx) => {
-      row.cells.forEach((cell, xIdx) => {
-        seriesData.push([xIdx, yIdx, cell.risk_index ?? 0, getCellColor(cell, data.columns[xIdx])]);
-      });
-    });
-
-    return {
-      tooltip: {
-        formatter: (params: any) => {
-          const row = data.rows[params.data[1]];
-          const col = data.columns[params.data[0]];
-          const cell = row?.cells[params.data[0]];
-          if (!cell) return "";
-          const tooltip = document.createElement("div");
-          const name = document.createElement("strong");
-          name.textContent = row.supplier_name;
-          tooltip.append(name, document.createElement("br"));
-          tooltip.append(document.createTextNode(`${COLUMN_LABELS[col.key] ?? col.label}: ${cell.value ?? "N/A"}${cell.diff != null ? ` (Δ${cell.diff > 0 ? "+" : ""}${cell.diff.toFixed(1)})` : ""}`));
-          tooltip.append(document.createElement("br"));
-          tooltip.append(document.createTextNode(t("heatmap.tooltipSource", { source: cell.source })));
-          return tooltip;
-        },
-      },
-      grid: { top: 40, right: 20, bottom: 60, left: 120 },
-      xAxis: { type: "category", data: xData, axisLabel: { fontSize: 11 } },
-      yAxis: { type: "category", data: yData, axisLabel: { fontSize: 11 } },
-      series: [{
-        type: "heatmap",
-        data: seriesData,
-        itemStyle: {
-          color: (params: any) => params.data[3],
-        },
-        label: {
-          show: true,
-          formatter: (params: any) => {
-            const row = data.rows[params.data[1]];
-            const cell = row?.cells[params.data[0]];
-            return cell?.value != null ? String(Math.round(cell.value * 10) / 10) : "-";
-          },
-          fontSize: 10,
-        },
-        emphasis: { itemStyle: { borderColor: "#1890ff", borderWidth: 2 } },
-      }],
-    };
-  }, [data, t]);
+export default function RiskHeatmap({ data, selectedSupplierIds = [], onSupplierClick }: RiskHeatmapProps) {
+  const { t, i18n } = useTranslation("supplyChainRiskMap");
+  const number = new Intl.NumberFormat(i18n.resolvedLanguage, { maximumFractionDigits: 2 });
+  const columns = data.columns.map((column) => ({
+    ...column,
+    title: t(`heatmap.columns.${column.key}`, { defaultValue: column.label }),
+  }));
 
   return (
-    <ReactECharts
-      option={option}
-      style={{ height: "auto", minHeight: Math.max(300, data.rows.length * 45 + 80) }}
-      onEvents={{ click: (params: any) => {
-        if (onSupplierClick && params.data) {
-          const row = data.rows[params.data[1]];
-          if (row) onSupplierClick(row.supplier_id);
-        }
-      }}}
-    />
+    <div className="risk-heatmap">
+      <ul className="risk-heatmap__legend" aria-label={t("heatmap.legend")}>
+        {[...RISK_LEVELS, "missing"].map((tone) => (
+          <li key={tone}>
+            <span className="risk-heatmap__swatch" data-tone={tone} aria-hidden="true" />
+            {t(`heatmap.tones.${tone}`)}
+          </li>
+        ))}
+      </ul>
+      <div className="risk-heatmap__scroll" role="region" aria-label={t("heatmap.title")} tabIndex={0}>
+        <table
+          className="risk-heatmap__table"
+          aria-label={t("heatmap.title")}
+          style={{ "--risk-column-count": columns.length } as CSSProperties}
+        >
+          <colgroup>
+            <col className="risk-heatmap__supplier-width" />
+            {columns.map((column) => <col key={column.key} />)}
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="risk-heatmap__supplier" scope="col">{t("heatmap.supplier")}</th>
+              {columns.map((column) => <th key={column.key} scope="col">{column.title}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((row) => {
+              const selected = selectedSupplierIds.includes(row.supplier_id);
+              const cells = new Map(row.cells.map((cell) => [cell.key, cell]));
+              const select = onSupplierClick && (() => onSupplierClick(row.supplier_id));
+              return (
+                <tr key={row.supplier_id} data-selected={selected}>
+                  <th className="risk-heatmap__supplier" scope="row">
+                    {select ? (
+                      <button className="risk-heatmap__name" type="button" aria-pressed={selected} onClick={select}>
+                        {row.supplier_name}
+                      </button>
+                    ) : row.supplier_name}
+                  </th>
+                  {columns.map((column) => {
+                    const cell = cells.get(column.key);
+                    const unit = column.type === "percent" ? "%" : "";
+                    const value = cell?.value == null ? "—" : `${number.format(cell.value)}${unit}`;
+                    const tone = getCellTone(cell, column);
+                    const details = [
+                      `${row.supplier_name} · ${column.title}`,
+                      tone === "missing" ? t("heatmap.tones.missing") : value,
+                    ];
+                    if (tone !== "neutral" && tone !== "missing") details.push(t(`heatmap.tones.${tone}`));
+                    if (cell?.diff != null) {
+                      const change = `${cell.diff > 0 ? "+" : ""}${number.format(cell.diff)}${unit}`;
+                      details.push(t("heatmap.change", { value: change }));
+                    }
+                    if (cell) {
+                      const source = t(`dataSource.${cell.source}`, { defaultValue: cell.source });
+                      details.push(t("heatmap.tooltipSource", { source }));
+                    }
+                    const label = details.join("\n");
+                    return (
+                      <td key={column.key}>
+                        {select ? (
+                          <button
+                            className="risk-heatmap__value"
+                            data-tone={tone}
+                            type="button"
+                            tabIndex={-1}
+                            aria-pressed={selected}
+                            aria-label={label}
+                            title={label}
+                            onClick={select}
+                          >
+                            {value}
+                          </button>
+                        ) : (
+                          <span className="risk-heatmap__value" data-tone={tone} title={label}>{value}</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
-};
-
-export default RiskHeatmap;
+}

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { Spin } from "antd";
 import { classifyToken } from "./utils/jwt";
 import { useAuthStore } from "./store/authStore";
@@ -185,7 +185,7 @@ export default function App() {
           path="/supplier-risk"
           element={
             <ProtectedRoute requiredModule="supplier_risk">
-              <AppLayout />
+              <Outlet />
             </ProtectedRoute>
           }
         >
