@@ -189,7 +189,7 @@ The wizard includes cascade delete (`wizardCascadeDelete`): deleting a shared co
 Only FMEA documents in `draft` or `rework` status can be deleted:
 
 - The list page (`FMEAListPage`) shows a delete button for these statuses; other statuses do not expose the entry
-- Backend status guard: non-`draft` / `rework` returns 400 "只能删除草稿或返工状态的FMEA"
+- Backend status guard: non-`draft` / `rework` returns 400 "Only FMEAs in draft or rework status can be deleted" (localized per `Accept-Language`)
 - Before deletion, `_null_out_fmea_references` nulls the FMEA foreign keys on related `control_plan`, `capa_eightd`, etc. records, avoiding `IntegrityError` → 500 from FK constraints
 - Deletion is written to the audit log
 

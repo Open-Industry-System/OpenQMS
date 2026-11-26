@@ -1,28 +1,28 @@
-# 管理评审 / 质量目标 / 仪表盘 模块 — 用户手册
+# Module Managementbewertung / Qualitätsziele / Dashboard — Benutzerhandbuch
 
-> 最后更新: 2026-06-13 | 适用版本: OpenQMS v1.0
+> Zuletzt aktualisiert: 2026-06-13 | Gilt für: OpenQMS v1.0
 
 ---
 
-## 1. 功能概述
+## 1. Funktionsüberblick
 
-本文档覆盖三个紧密关联的模块：
+Dieses Dokument behandelt drei eng verbundene Module:
 
-| 模块 | ModuleKey | 核心定位 |
+| Modul | ModuleKey | Kernaufgabe |
 |------|-----------|---------|
-| 管理评审 | `management_review` | ISO 9001 §9.3 管理评审全流程管理，从数据自动汇总到评审报告生成与输出跟踪 |
-| 质量目标 | `quality_goal` | 三级质量目标树（公司 → 产品线 → 过程）的建立、审批与 KPI 跟踪 |
-| 仪表盘 | `dashboard` | 跨模块 KPI 汇总、告警推送、最近操作记录、可自定义的组件化布局 |
+| Managementbewertung | `management_review` | Gesamtablauf der Managementbewertung nach ISO 9001 §9.3, von der automatischen Datenzusammenstellung bis zum Bewertungsbericht und der Verfolgung der Ergebnisse |
+| Qualitätsziele | `quality_goal` | Aufbau, Freigabe und KPI-Verfolgung eines dreistufigen Zielbaums (Unternehmen → Produktlinie → Prozess) |
+| Dashboard | `dashboard` | Modulübergreifende KPI-Übersicht, Warnungen, letzte Aktionen, anpassbares Widget-Layout |
 
-三者的业务逻辑闭环：质量目标定义 "做到什么程度"，管理评审检验 "做到了没有"，仪表盘实时呈现 "当前状态如何"。
+Zusammen bilden sie einen geschlossenen Kreislauf: Qualitätsziele legen fest, „was erreicht werden soll“, die Managementbewertung prüft, „ob es erreicht wurde“, und das Dashboard zeigt in Echtzeit „wie der aktuelle Stand ist“.
 
 ---
 
-## 2. 适用角色与权限
+## 2. Rollen und Berechtigungen
 
-权限模型采用 **ModuleKey × PermissionLevel × 角色** 三级结构。
+Das Berechtigungsmodell ist dreistufig: **ModuleKey × PermissionLevel × Rolle**.
 
-PermissionLevel 含义：0 = NONE（不可见）、1 = VIEW（只读）、2 = CREATE（可新建）、3 = EDIT（可编辑内容）、4 = APPROVE（可审批）、5 = ADMIN（完全控制）。
+Bedeutung von PermissionLevel: 0 = NONE (unsichtbar), 1 = VIEW (nur lesen), 2 = CREATE (anlegen), 3 = EDIT (Inhalte bearbeiten), 4 = APPROVE (freigeben), 5 = ADMIN (Vollzugriff).
 
 | ModuleKey | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
 |-----------|:-----:|:-------:|:--------:|:-----------:|:-----------:|:-----------:|:------:|
@@ -30,69 +30,69 @@ PermissionLevel 含义：0 = NONE（不可见）、1 = VIEW（只读）、2 = CR
 | quality_goal | 5 | 4 | 0 | 0 | 0 | 0 | 1 |
 | dashboard | 5 | 4 | 1 | 1 | 1 | 1 | 1 |
 
-**操作与最低权限对照：**
+**Operationen und Mindestberechtigung:**
 
-### 管理评审 (management_review)
+### Managementbewertung (management_review)
 
-| 操作 | 所需 PermissionLevel | 说明 |
+| Operation | Erforderliche PermissionLevel | Beschreibung |
 |------|---------------------|------|
-| 查看评审列表/详情 | VIEW (1) | viewer、field_qe、planning_qe 可查看 |
-| 创建评审 | CREATE (2) | 仅 manager (APPROVE=4) 及 admin 实际可创建 |
-| 编辑评审信息 | CREATE (2) | 草稿/数据已汇总状态下可编辑 |
-| 采集数据 / 刷新数据 | CREATE (2) | 自动汇总各模块数据包 |
-| 提交评审 / 关闭 / 重新开启 | APPROVE (4) | manager 及 admin 可执行状态推进 |
-| 删除评审 | ADMIN (5) | 仅 admin 可删除草稿状态评审 |
-| 创建/编辑评审输出 | CREATE (2) | 在 in_review 状态下添加改进机会等 |
-| 验证输出 | CREATE (2) | 标记输出为已验证 |
-| 生成/编辑报告 | CREATE (2) | 支持 LLM 辅助生成 |
-| 最终确认报告 | APPROVE (4) | manager 及 admin |
+| Bewertungsliste/-details ansehen | VIEW (1) | viewer, field_qe, planning_qe können ansehen |
+| Bewertung anlegen | CREATE (2) | Praktisch nur manager (APPROVE=4) und admin |
+| Bewertungsinformationen bearbeiten | CREATE (2) | Im Status Entwurf/Daten zusammengestellt bearbeitbar |
+| Daten erfassen / aktualisieren | CREATE (2) | Datenpakete der Module automatisch zusammenstellen |
+| Bewertung einreichen / schließen / wieder öffnen | APPROVE (4) | Statusweiterschaltung durch manager und admin |
+| Bewertung löschen | ADMIN (5) | Nur admin kann Bewertungen im Entwurfsstatus löschen |
+| Bewertungsergebnisse anlegen/bearbeiten | CREATE (2) | Im Status in_review Verbesserungsmöglichkeiten usw. ergänzen |
+| Ergebnisse verifizieren | CREATE (2) | Ergebnis als verifiziert markieren |
+| Bericht erzeugen/bearbeiten | CREATE (2) | Mit LLM-Unterstützung |
+| Bericht final bestätigen | APPROVE (4) | manager und admin |
 
-### 质量目标 (quality_goal)
+### Qualitätsziele (quality_goal)
 
-| 操作 | 所需 PermissionLevel | 说明 |
+| Operation | Erforderliche PermissionLevel | Beschreibung |
 |------|---------------------|------|
-| 查看目标列表/详情 | VIEW (1) | viewer 可查看 |
-| 创建目标 | CREATE (2) | 仅 manager (APPROVE=4) 及 admin 实际可创建 |
-| 编辑目标 | CREATE (2) | 草稿状态下可编辑 |
-| 提交审批 | CREATE (2) | draft → pending |
-| 审批/驳回目标 | APPROVE (4) | pending → active 或退回 draft |
-| 撤回提交 | CREATE (2) | pending → draft |
-| 归档目标 | APPROVE (4) | active → archived |
-| 更新实际值 | CREATE (2) | 更新目标完成度的实际值 |
-| 删除目标 | CREATE (2) | 仅草稿状态可删除 |
+| Zielliste/-details ansehen | VIEW (1) | viewer kann ansehen |
+| Ziel anlegen | CREATE (2) | Praktisch nur manager (APPROVE=4) und admin |
+| Ziel bearbeiten | CREATE (2) | Im Entwurfsstatus bearbeitbar |
+| Zur Freigabe einreichen | CREATE (2) | draft → pending |
+| Ziel freigeben/zurückweisen | APPROVE (4) | pending → active oder zurück auf draft |
+| Einreichung zurückziehen | CREATE (2) | pending → draft |
+| Ziel archivieren | APPROVE (4) | active → archived |
+| Istwert aktualisieren | CREATE (2) | Istwert des Zielerreichungsgrads aktualisieren |
+| Ziel löschen | CREATE (2) | Nur im Entwurfsstatus löschbar |
 
-### 仪表盘 (dashboard)
+### Dashboard (dashboard)
 
-| 操作 | 所需 PermissionLevel | 说明 |
+| Operation | Erforderliche PermissionLevel | Beschreibung |
 |------|---------------------|------|
-| 查看仪表盘 | VIEW (1) | 所有角色可见 |
-| 编辑布局 | EDIT (3) | 仅 manager 及 admin 可自定义布局 |
-| 查看特定组件 | 依赖关联模块权限 | 高 RPN FMEA 组件需 fmea VIEW，逾期 CAPA 组件需 capa VIEW，以此类推 |
+| Dashboard ansehen | VIEW (1) | Für alle Rollen sichtbar |
+| Layout bearbeiten | EDIT (3) | Nur manager und admin können das Layout anpassen |
+| Bestimmte Widgets ansehen | Abhängig von den Rechten des verknüpften Moduls | Widget „FMEA mit hoher RPN“ braucht fmea VIEW, „überfällige CAPA“ braucht capa VIEW usw. |
 
 ---
 
-## 3. 管理评审
+## 3. Managementbewertung
 
-### 3.1 ISO 9001 §9.3 合规依据
+### 3.1 Grundlage ISO 9001 §9.3
 
-ISO 9001 第 9.3 条要求组织按策划时间间隔进行管理评审，以确保质量管理体系的持续适宜性、充分性和有效性。OpenQMS 管理评审模块完整覆盖标准要求：
+ISO 9001 Abschnitt 9.3 verlangt Managementbewertungen in geplanten Abständen, um fortdauernde Eignung, Angemessenheit und Wirksamkeit des Qualitätsmanagementsystems sicherzustellen. Das Modul deckt die Normanforderungen vollständig ab:
 
-| 标准条款 | 系统对应 |
+| Normabschnitt | Umsetzung im System |
 |----------|---------|
-| 9.3.2 a) 以往管理评审的措施落实 | 数据包 "previous_review_actions"，自动汇总历史评审输出的完成率 |
-| 9.3.2 b) 质量目标实现程度 | 数据包 "quality_goals"，从质量目标模块自动拉取达成/落后数据 |
-| 9.3.2 c) 审核结果 | 数据包 "internal_audits"，汇总审核发现总数及关闭率 |
-| 9.3.2 d) 不合格与纠正措施 | 数据包 "capa_stats"，统计开放/关闭 CAPA 数量 |
-| 9.3.2 e) FMEA 风险分析 | 数据包 "fmea_risks"，统计高 AP 节点数量及状态分布 |
-| 9.3.2 f) SPC 过程能力 | 数据包 "spc_capability"，汇总控制图数及失控事件 |
-| 9.3.2 g) 外部供方绩效 | 数据包 "supplier_performance"，汇总供方评级分布及交付分数 |
-| 9.3.3 a) 改进机会 | ReviewOutput category = `improvement_opportunity` |
-| 9.3.3 b) 质量管理体系变更需求 | ReviewOutput category = `system_change` |
-| 9.3.3 c) 资源需求 | ReviewOutput category = `resource_need` |
+| 9.3.2 a) Umsetzung von Maßnahmen früherer Managementbewertungen | Datenpaket „previous_review_actions“, automatische Erfüllungsquote der früheren Bewertungsergebnisse |
+| 9.3.2 b) Grad der Erreichung der Qualitätsziele | Datenpaket „quality_goals“, erreichte/zurückliegende Ziele automatisch aus dem Modul Qualitätsziele |
+| 9.3.2 c) Auditergebnisse | Datenpaket „internal_audits“, Anzahl Auditfeststellungen und Abschlussquote |
+| 9.3.2 d) Nichtkonformitäten und Korrekturmaßnahmen | Datenpaket „capa_stats“, Anzahl offener/geschlossener CAPAs |
+| 9.3.2 e) FMEA-Risikoanalyse | Datenpaket „fmea_risks“, Anzahl Knoten mit hohem AP und Statusverteilung |
+| 9.3.2 f) SPC-Prozessfähigkeit | Datenpaket „spc_capability“, Anzahl Regelkarten und Ereignisse außer Kontrolle |
+| 9.3.2 g) Leistung externer Anbieter | Datenpaket „supplier_performance“, Verteilung der Lieferanteneinstufung und Lieferbewertung |
+| 9.3.3 a) Verbesserungsmöglichkeiten | ReviewOutput category = `improvement_opportunity` |
+| 9.3.3 b) Änderungsbedarf am Qualitätsmanagementsystem | ReviewOutput category = `system_change` |
+| 9.3.3 c) Ressourcenbedarf | ReviewOutput category = `resource_need` |
 
-### 3.2 状态流转
+### 3.2 Statusübergänge
 
-管理评审文档具有以下状态：
+Dokumente der Managementbewertung haben folgende Status:
 
 ```
 draft → data_collected → in_review → closed
@@ -102,296 +102,296 @@ draft → data_collected → in_review → closed
                                └───────────────┘
 ```
 
-| 状态 | 中文 | 说明 | 可执行操作 |
+| Status | Bezeichnung | Beschreibung | Mögliche Aktionen |
 |------|------|------|-----------|
-| `draft` | 草稿 | 初始状态，填写评审基本信息 | 编辑、删除、采集数据 |
-| `data_collected` | 数据已汇总 | 系统已自动采集各模块数据包 | 编辑（含 manual_inputs）、退回草稿、开始评审 |
-| `in_review` | 评审中 | 评审会议进行中 | 添加/编辑评审输出、会议纪要、关闭评审 |
-| `closed` | 已关闭 | 评审完成 | 重新开启、查看输出跟踪 |
+| `draft` | Entwurf | Ausgangsstatus, Grunddaten der Bewertung erfassen | Bearbeiten, löschen, Daten erfassen |
+| `data_collected` | Daten zusammengestellt | Das System hat die Datenpakete der Module automatisch erfasst | Bearbeiten (inkl. manual_inputs), zurück auf Entwurf, Bewertung starten |
+| `in_review` | In Bewertung | Bewertungssitzung läuft | Bewertungsergebnisse/Protokoll anlegen/bearbeiten, Bewertung schließen |
+| `closed` | Geschlossen | Bewertung abgeschlossen | Wieder öffnen, Verfolgung der Ergebnisse ansehen |
 
-**关键规则：**
-- 只有 `draft` 状态的评审可被删除
-- 只有 `draft` 状态可执行采集数据（collect_data）
-- 只有 `data_collected` 状态可退回草稿或开始评审
-- 关闭评审（close_review）要求至少有 1 条输出或会议纪要
-- `closed` 状态可重新开启（reopen）回到 `in_review`
+**Wichtige Regeln:**
+- Nur Bewertungen im Status `draft` können gelöscht werden
+- Nur im Status `draft` können Daten erfasst werden (collect_data)
+- Nur im Status `data_collected` ist Zurück auf Entwurf oder Bewertung starten möglich
+- Das Schließen (close_review) erfordert mindestens ein Ergebnis oder ein Protokoll
+- Im Status `closed` kann wieder geöffnet werden (reopen) → `in_review`
 
-### 3.3 数据包自动汇总
+### 3.3 Automatische Zusammenstellung der Datenpakete
 
-点击 "采集数据" 按钮后，系统自动从各模块拉取数据形成 `data_package` JSONB 字段，包含以下七个数据域：
+Nach Klick auf „Daten erfassen“ holt das System Daten aus den Modulen in das JSONB-Feld `data_package` mit sieben Datenbereichen:
 
-| 数据域 | 数据来源 | 关键指标 |
+| Datenbereich | Datenquelle | Kennzahlen |
 |--------|---------|---------|
-| `quality_goals` | 质量目标模块 | total / achieved / on_track / behind |
-| `internal_audits` | 审核模块 | total_findings / closed_findings / open_findings / closure_rate |
-| `capa_stats` | CAPA 模块 | total / open / closed |
-| `fmea_risks` | FMEA 模块 | total_documents / high_ap_count / status_distribution |
-| `spc_capability` | SPC 模块 | total_control_charts / out_of_control_events |
-| `supplier_performance` | 供方管理 | total_suppliers / rating_distribution / avg_delivery_score |
-| `previous_review_actions` | 本模块历史输出 | total_outputs / completed / verified / in_progress / pending / completion_rate |
+| `quality_goals` | Modul Qualitätsziele | total / achieved / on_track / behind |
+| `internal_audits` | Auditmodul | total_findings / closed_findings / open_findings / closure_rate |
+| `capa_stats` | CAPA-Modul | total / open / closed |
+| `fmea_risks` | FMEA-Modul | total_documents / high_ap_count / status_distribution |
+| `spc_capability` | SPC-Modul | total_control_charts / out_of_control_events |
+| `supplier_performance` | Lieferantenmanagement | total_suppliers / rating_distribution / avg_delivery_score |
+| `previous_review_actions` | Frühere Ergebnisse dieses Moduls | total_outputs / completed / verified / in_progress / pending / completion_rate |
 
-数据包支持按产品线筛选（`product_line_code` 参数），确保评审聚焦于特定产线。
+Datenpakete lassen sich nach Produktlinie filtern (Parameter `product_line_code`), damit sich die Bewertung auf eine bestimmte Linie konzentriert.
 
-### 3.4 评审输出 (Review Output)
+### 3.4 Bewertungsergebnisse (Review Output)
 
-评审输出是管理评审的核心成果，对应 ISO 9001 §9.3.3 的三类决定。每条输出包含：
+Bewertungsergebnisse sind das Kernergebnis der Managementbewertung und entsprechen den drei Entscheidungsarten aus ISO 9001 §9.3.3. Jedes Ergebnis enthält:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `category` | 输出类别：`improvement_opportunity`（改进机会）、`system_change`（体系变更）、`resource_need`（资源需求） |
-| `description` | 输出描述 |
-| `responsible_id` | 责任人 |
-| `due_date` | 截止日期 |
-| `status` | 输出状态：`pending` → `in_progress` → `completed` → `verified` |
-| `completion_notes` | 完成说明 |
-| `verified_by` / `verified_at` / `verification_notes` | 验证信息 |
+| `category` | Ergebnisart: `improvement_opportunity` (Verbesserungsmöglichkeit), `system_change` (Systemänderung), `resource_need` (Ressourcenbedarf) |
+| `description` | Beschreibung des Ergebnisses |
+| `responsible_id` | Verantwortliche Person |
+| `due_date` | Fälligkeitsdatum |
+| `status` | Ergebnisstatus: `pending` → `in_progress` → `completed` → `verified` |
+| `completion_notes` | Erledigungsnotiz |
+| `verified_by` / `verified_at` / `verification_notes` | Verifizierungsinformationen |
 
-输出状态流转：
+Statusübergänge der Ergebnisse:
 
 ```
 pending → in_progress → completed → verified
 ```
 
-- `completed` 状态表示输出已执行，等待验证
-- `verified` 状态表示验证人确认有效关闭
+- Status `completed` bedeutet: umgesetzt, wartet auf Verifizierung
+- Status `verified` bedeutet: von der verifizierenden Person als wirksam abgeschlossen bestätigt
 
-### 3.5 评审报告
+### 3.5 Bewertungsbericht
 
-管理评审支持自动报告生成：
+Die Managementbewertung unterstützt automatische Berichtserzeugung:
 
-| 功能 | 说明 |
+| Funktion | Beschreibung |
 |------|------|
-| 报告生成 (generate_report) | 基于 data_package 和 manual_inputs 自动构建报告，支持 LLM 辅助摘要 |
-| 报告草稿保存 (save_report_draft) | 保存编辑中的报告 |
-| 报告定稿 (finalize_report) | 确认报告最终版本，不可再编辑 |
-| 报告重开 (reopen_report) | 定稿后可重新开启编辑 |
-| 报告导出 (export_report) | 支持 Markdown 格式导出 |
-| 版本历史 (report/versions) | 保留每次定稿的版本记录 |
+| Bericht erzeugen (generate_report) | Erstellt den Bericht automatisch aus data_package und manual_inputs, optional mit LLM-Zusammenfassung |
+| Berichtsentwurf speichern (save_report_draft) | Bericht in Bearbeitung speichern |
+| Bericht finalisieren (finalize_report) | Endfassung bestätigen, danach nicht mehr bearbeitbar |
+| Bericht wieder öffnen (reopen_report) | Nach der Finalisierung wieder zur Bearbeitung öffnen |
+| Bericht exportieren (export_report) | Export im Markdown-Format |
+| Versionshistorie (report/versions) | Bewahrt jede finalisierte Version auf |
 
-报告状态 (report_status)：`none` → `draft` → `final`，定稿后需 reopen 才能重新生成。
+Berichtsstatus (report_status): `none` → `draft` → `final`; nach der Finalisierung ist reopen nötig, um neu zu erzeugen.
 
-### 3.6 前端页面
+### 3.6 Frontend-Seiten
 
-| 页面 | 路由 | 说明 |
+| Seite | Route | Beschreibung |
 |------|------|------|
-| 评审列表 | `/management-reviews` | 列表、筛选、新建评审 |
-| 评审详情 | `/management-reviews/:id` | 评审信息、数据包、输出管理、报告生成 |
+| Bewertungsliste | `/management-reviews` | Liste, Filter, neue Bewertung |
+| Bewertungsdetails | `/management-reviews/:id` | Bewertungsinformationen, Datenpaket, Ergebnisverwaltung, Berichtserzeugung |
 
-### 3.7 文档编号规则
+### 3.7 Nummerierung
 
-管理评审文档编号格式为 `MR-{YYYY}-{NNN}`，例如 `MR-2026-001`，由系统自动递增生成。
+Managementbewertungen haben das Format `MR-{YYYY}-{NNN}`, z. B. `MR-2026-001`, vom System automatisch hochgezählt.
 
 ---
 
-## 4. 质量目标
+## 4. Qualitätsziele
 
-### 4.1 三级目标树结构
+### 4.1 Dreistufiger Zielbaum
 
-质量目标采用三级层级树（parent_id 自引用），严格校验层级关系：
+Qualitätsziele bilden einen dreistufigen Baum (Selbstreferenz über parent_id) mit strenger Prüfung der Ebenen:
 
-| 层级 (level) | 名称 | 说明 | parent_id |
+| Ebene (level) | Name | Beschreibung | parent_id |
 |:---:|------|------|-----------|
-| 1 | 公司级目标 | 组织整体质量目标，不可关联上级 | `null` |
-| 2 | 产品线目标 | 按产品线分解的目标 | level 1 的 goal_id |
-| 3 | 过程目标 | 具体过程/工序级目标 | level 2 的 goal_id |
+| 1 | Unternehmensziel | Gesamtziel der Organisation, ohne übergeordnetes Ziel | `null` |
+| 2 | Produktlinienziel | Nach Produktlinie aufgeschlüsseltes Ziel | goal_id einer Ebene 1 |
+| 3 | Prozessziel | Ziel auf Ebene eines konkreten Prozesses/Arbeitsgangs | goal_id einer Ebene 2 |
 
-**层级校验规则：**
-- level = 1 时 parent_id 必须为 null（公司级目标不可有上级）
-- level > 1 时 parent_id 必须为对应的上一级目标 ID
-- parent 的 level 必须等于当前 level - 1
+**Regeln der Ebenenprüfung:**
+- Bei level = 1 muss parent_id null sein (Unternehmensziele haben kein übergeordnetes Ziel)
+- Bei level > 1 muss parent_id die ID des Ziels der darüberliegenden Ebene sein
+- Das level des übergeordneten Ziels muss dem aktuellen level - 1 entsprechen
 
-### 4.2 目标字段说明
+### 4.2 Felder eines Ziels
 
-| 字段 | 类型 | 说明 |
+| Feld | Typ | Beschreibung |
 |------|------|------|
-| `doc_no` | string | 系统生成的编号，格式 `QG-{YYYY}-{NNN}` |
-| `name` | string | 目标名称 |
-| `target_value` | string | 目标值，支持 `≥99%`、`≤50ppm` 等含比较符号的表达式 |
-| `actual_value` | string? | 实际达成值（如 `98.5%`），初始为空 |
-| `unit` | string | 计量单位（如 `%`、`ppm`、`件`） |
-| `period` | string | 周期：`月度`、`季度`、`年度` |
-| `owner_id` | UUID | 目标负责人 |
-| `product_line_code` | string? | 关联产品线（level 2/3 常用） |
-| `data_source_formula` | string? | 数据来源公式，用于说明实际值的取值逻辑 |
-| `description` | string? | 目标详细描述 |
+| `doc_no` | string | Vom System erzeugte Nummer im Format `QG-{YYYY}-{NNN}` |
+| `name` | string | Zielname |
+| `target_value` | string | Zielwert, auch mit Vergleichsoperator wie `≥99%`, `≤50ppm` |
+| `actual_value` | string? | Tatsächlich erreichter Wert (z. B. `98.5%`), anfangs leer |
+| `unit` | string | Maßeinheit (z. B. `%`, `ppm`, Stück) |
+| `period` | string | Zeitraum: monatlich, vierteljährlich, jährlich (als gespeicherte Altwerte hinterlegt) |
+| `owner_id` | UUID | Zielverantwortliche Person |
+| `product_line_code` | string? | Verknüpfte Produktlinie (üblich bei Ebene 2/3) |
+| `data_source_formula` | string? | Formel der Datenquelle, beschreibt die Ermittlung des Istwerts |
+| `description` | string? | Ausführliche Zielbeschreibung |
 
-### 4.3 审批流与状态流转
+### 4.3 Freigabeablauf und Statusübergänge
 
 ```
 draft → pending → active
   ↑       │          │
   └───────┘          │
-  (驳回/撤回)         ↓
+  (Zurückweisen/Zurückziehen)         ↓
                    archived
 ```
 
-| 状态 | 中文 | 说明 | 可执行操作 |
+| Status | Bezeichnung | Beschreibung | Mögliche Aktionen |
 |------|------|------|-----------|
-| `draft` | 草稿 | 初始状态，可编辑 | 编辑、删除、提交审批 |
-| `pending` | 待审批 | 等待经理/管理员审批 | 审批通过、驳回（需填写原因）、撤回 |
-| `active` | 生效 | 审批通过，开始跟踪 | 更新实际值、归档 |
-| `archived` | 已归档 | 历史归档 | 查看 |
+| `draft` | Entwurf | Ausgangsstatus, bearbeitbar | Bearbeiten, löschen, zur Freigabe einreichen |
+| `pending` | Wartet auf Freigabe | Wartet auf Freigabe durch Manager/Administrator | Freigeben, zurückweisen (mit Begründung), zurückziehen |
+| `active` | Aktiv | Freigegeben, Verfolgung beginnt | Istwert aktualisieren, archivieren |
+| `archived` | Archiviert | Historisches Archiv | Ansehen |
 
-**操作权限要点：**
-- 提交审批（draft → pending）：CREATE (2) 及以上
-- 审批通过（pending → active）：APPROVE (4) 及以上
-- 驳回（pending → draft，需填写 reject_reason）：APPROVE (4) 及以上
-- 撤回（pending → draft）：CREATE (2) 及以上
-- 归档（active → archived）：APPROVE (4) 及以上
-- 删除仅限 draft 状态
+**Wichtige Rechte:**
+- Zur Freigabe einreichen (draft → pending): ab CREATE (2)
+- Freigeben (pending → active): ab APPROVE (4)
+- Zurückweisen (pending → draft, reject_reason erforderlich): ab APPROVE (4)
+- Zurückziehen (pending → draft): ab CREATE (2)
+- Archivieren (active → archived): ab APPROVE (4)
+- Löschen nur im Status draft
 
-### 4.4 KPI 跟踪
+### 4.4 KPI-Verfolgung
 
-目标生效后（status = `active`），负责人可定期更新 `actual_value` 字段以跟踪完成情况。管理评审数据包会自动拉取 `quality_goals` 数据，计算：
+Ist ein Ziel aktiv (status = `active`), aktualisiert die verantwortliche Person regelmäßig `actual_value`. Das Datenpaket der Managementbewertung holt `quality_goals` automatisch und berechnet:
 
-- `total`：生效中的目标总数
-- `achieved`：已达标目标数（根据 target_value 的比较符号判定）
-- `on_track`：进展正常的目标数
-- `behind`：落后于目标值的数量
+- `total`: Anzahl aktiver Ziele
+- `achieved`: Anzahl erreichter Ziele (nach dem Vergleichsoperator in target_value)
+- `on_track`: Anzahl planmäßig verlaufender Ziele
+- `behind`: Anzahl hinter dem Zielwert zurückliegender Ziele
 
-系统支持 `≥` / `<=` 等比较符号的目标值判定逻辑（如 target_value = `≥99%` 时，actual_value >= 99 即视为达标）。
+Das System bewertet Zielwerte mit Vergleichsoperatoren wie `≥` / `<=` (bei target_value = `≥99%` gilt actual_value >= 99 als erreicht).
 
-### 4.5 前端页面
+### 4.5 Frontend-Seiten
 
-| 页面 | 路由 | 说明 |
+| Seite | Route | Beschreibung |
 |------|------|------|
-| 质量目标列表 | `/quality-goals` | 树形展示、筛选、新建/编辑/审批 |
+| Liste der Qualitätsziele | `/quality-goals` | Baumdarstellung, Filter, anlegen/bearbeiten/freigeben |
 
 ---
 
-## 5. 仪表盘
+## 5. Dashboard
 
-### 5.1 概述
+### 5.1 Überblick
 
-仪表盘是 OpenQMS 的首页入口，以组件化卡片布局实时呈现跨模块质量 KPI、告警信息和操作记录。用户登录后自动进入仪表盘页面（路由 `/dashboard`），无需额外模块权限守卫（仅需登录认证），但组件可见性受各关联模块权限控制。
+Das Dashboard ist die Startseite von OpenQMS und zeigt in Widget-Karten modulübergreifende Qualitäts-KPIs, Warnungen und Aktionsprotokolle in Echtzeit. Nach der Anmeldung gelangen Benutzer automatisch auf das Dashboard (Route `/dashboard`); es braucht keinen zusätzlichen Modulschutz (nur Anmeldung), die Sichtbarkeit einzelner Widgets hängt aber von den Rechten der verknüpften Module ab.
 
-### 5.2 KPI 卡片
+### 5.2 KPI-Karten
 
-仪表盘默认展示四张 KPI 概览卡片：
+Standardmäßig zeigt das Dashboard vier KPI-Übersichtskarten:
 
-| 组件 | widget type | 数据来源 | 说明 |
+| Widget | widget type | Datenquelle | Beschreibung |
 |------|-------------|---------|------|
-| 待办事项 | `kpi_pending_actions` | `/api/dashboard/kpi` | 待处理的 FMEA/CAPA/评审等任务数 |
-| 逾期任务 | `kpi_overdue_tasks` | `/api/dashboard/kpi` | 已逾期的任务数 |
-| 高风险项 | `kpi_high_risk_items` | `/api/dashboard/kpi` | RPN ≥ 100 的 FMEA 节点数、逾期 CAPA 等 |
-| 月度趋势 | `kpi_month_trend` | `/api/dashboard/kpi` | 本月关键指标环比变化 |
+| Offene Aufgaben | `kpi_pending_actions` | `/api/dashboard/kpi` | Anzahl offener Aufgaben zu FMEA/CAPA/Bewertungen usw. |
+| Überfällige Aufgaben | `kpi_overdue_tasks` | `/api/dashboard/kpi` | Anzahl überfälliger Aufgaben |
+| Hochrisikopunkte | `kpi_high_risk_items` | `/api/dashboard/kpi` | FMEA-Knoten mit RPN ≥ 100, überfällige CAPAs usw. |
+| Monatstrend | `kpi_month_trend` | `/api/dashboard/kpi` | Veränderung zentraler Kennzahlen dieses Monats gegenüber dem Vormonat |
 
-### 5.3 告警组件
+### 5.3 Warn-Widgets
 
-| 组件 | widget type | 关联模块 | 说明 |
+| Widget | widget type | Verknüpftes Modul | Beschreibung |
 |------|-------------|---------|------|
-| 高 RPN FMEA | `alert_high_rpn_fmea` | fmea | 列出 RPN ≥ 100 的 FMEA 失效节点 |
-| 逾期 CAPA | `alert_overdue_capa` | capa | 列出超过 due_date 的 CAPA 报告 |
-| 高 PPM 供方 | `alert_high_ppm_suppliers` | supplier | PPM 超标的供应商列表 |
+| FMEA mit hoher RPN | `alert_high_rpn_fmea` | fmea | Listet FMEA-Fehlerknoten mit RPN ≥ 100 |
+| Überfällige CAPA | `alert_overdue_capa` | capa | Listet CAPA-Berichte über due_date |
+| Lieferanten mit hoher PPM | `alert_high_ppm_suppliers` | supplier | Lieferanten mit PPM über Grenzwert |
 
-组件可见性由关联模块的 VIEW 权限控制：若用户对 fmea 模块无 VIEW 权限，则高 RPN FMEA 组件不显示。
+Die Sichtbarkeit richtet sich nach VIEW im verknüpften Modul: Ohne VIEW im Modul fmea wird das Widget „FMEA mit hoher RPN“ nicht angezeigt.
 
-### 5.4 更多可选组件
+### 5.4 Weitere optionale Widgets
 
-除默认布局外，用户可从组件库添加以下组件：
+Neben dem Standardlayout können Benutzer folgende Widgets aus der Bibliothek ergänzen:
 
-| 组件 | widget type | 关联模块 | 说明 |
+| Widget | widget type | Verknüpftes Modul | Beschreibung |
 |------|-------------|---------|------|
-| SPC 失控事件 | `spc_abnormal_count` | spc | SPC 控制图失控点数量 |
-| SPC 过程能力 | `spc_capability_summary` | spc | Cpk 平均值统计 |
-| MSA 量具到期 | `msa_gauge_expiry` | msa | 30 天内到期需校验的量具数 |
-| IQC 待检 | `iqc_pending_inspections` | iqc | 待处理的来料检验批数 |
-| MES 设备状态 | `mes_equipment_status` | mes | 运行/停机/空闲设备数 |
-| 供方 PPM 趋势 | `supplier_ppm_trend` | supplier | 供应商 PPM 趋势数据 |
-| 质量趋势 AI | `quality_trend_ai_summary` | dashboard | AI 辅助质量趋势分析摘要 |
-| 最近操作 | `recent_actions` | dashboard | 最近 20 条审计日志 |
+| SPC-Ereignisse außer Kontrolle | `spc_abnormal_count` | spc | Anzahl Punkte außer Kontrolle in SPC-Regelkarten |
+| SPC-Prozessfähigkeit | `spc_capability_summary` | spc | Statistik der mittleren Cpk |
+| MSA-Prüfmittelfälligkeit | `msa_gauge_expiry` | msa | Anzahl Prüfmittel mit Kalibrierfälligkeit in 30 Tagen |
+| Offene IQC-Prüfungen | `iqc_pending_inspections` | iqc | Anzahl offener Wareneingangsprüflose |
+| MES-Anlagenstatus | `mes_equipment_status` | mes | Anzahl Anlagen in Betrieb/Stillstand/Leerlauf |
+| PPM-Trend der Lieferanten | `supplier_ppm_trend` | supplier | PPM-Trenddaten der Lieferanten |
+| KI-Qualitätstrend | `quality_trend_ai_summary` | dashboard | KI-gestützte Zusammenfassung der Qualitätstrends |
+| Letzte Aktionen | `recent_actions` | dashboard | Die letzten 20 Audit-Log-Einträge |
 
-### 5.5 管理评审 KPI
+### 5.5 KPIs der Managementbewertung
 
-仪表盘 KPI 中包含管理评审模块的关键指标（`/api/dashboard` 的 `kpi.management_review` 节点）：
+Die Dashboard-KPIs enthalten zentrale Kennzahlen der Managementbewertung (Knoten `kpi.management_review` von `/api/dashboard`):
 
-| 指标 | 字段 | 说明 |
+| Kennzahl | Feld | Beschreibung |
 |------|------|------|
-| 评审总数 | `total_reviews` | 全部管理评审数量 |
-| 已关闭评审 | `closed_reviews` | 已完成评审数量 |
-| 输出总数 | `total_outputs` | 评审输出总数 |
-| 已验证输出 | `verified_outputs` | 已验证关闭的输出数 |
-| 待验证输出 | `pending_verification` | 状态为 completed 等待验证的输出数 |
-| 完成率 | `completion_rate` | (completed + verified) / total_outputs |
+| Bewertungen gesamt | `total_reviews` | Anzahl aller Managementbewertungen |
+| Geschlossene Bewertungen | `closed_reviews` | Anzahl abgeschlossener Bewertungen |
+| Ergebnisse gesamt | `total_outputs` | Anzahl aller Bewertungsergebnisse |
+| Verifizierte Ergebnisse | `verified_outputs` | Anzahl verifiziert abgeschlossener Ergebnisse |
+| Zu verifizierende Ergebnisse | `pending_verification` | Anzahl Ergebnisse im Status completed, die auf Verifizierung warten |
+| Erledigungsquote | `completion_rate` | (completed + verified) / total_outputs |
 
-### 5.6 布局自定义
+### 5.6 Layout anpassen
 
-- 用户可点击 "编辑布局" 按钮进入编辑模式（需要 EDIT 权限，即 PermissionLevel ≥ 3）
-- 编辑模式支持：拖拽调整组件位置和大小、添加/删除组件、恢复默认布局
-- 布局配置通过 `/api/dashboard/layout` 接口持久化保存
-- 组件过滤逻辑：后端 `WIDGET_MODULE_MAP` 定义每个组件所需的模块权限，前端 `filterLayoutByPermission` 函数根据用户权限过滤不可见组件
-- 产品线筛选：仪表盘支持按产品线筛选数据（通过 URL 参数 `?product_line=xxx`）
+- Über „Layout bearbeiten“ gelangt man in den Bearbeitungsmodus (erfordert EDIT, also PermissionLevel ≥ 3)
+- Der Bearbeitungsmodus erlaubt: Position und Größe per Drag & Drop ändern, Widgets hinzufügen/entfernen, Standardlayout wiederherstellen
+- Die Layoutkonfiguration wird über `/api/dashboard/layout` gespeichert
+- Widget-Filter: `WIDGET_MODULE_MAP` im Backend definiert die je Widget nötigen Modulrechte, die Frontend-Funktion `filterLayoutByPermission` filtert unsichtbare Widgets nach Benutzerrechten
+- Produktlinienfilter: Das Dashboard filtert Daten nach Produktlinie (URL-Parameter `?product_line=xxx`)
 
-### 5.7 快捷链接
+### 5.7 Schnellzugriffe
 
-仪表盘页面根据用户角色权限动态展示各模块的快捷入口链接。viewer 角色仅看到只读链接；CREATE 及以上权限用户可看到 "新建" 入口。快捷链接对无 VIEW 权限的模块自动隐藏。
+Das Dashboard zeigt je nach Rollenrechten dynamisch Schnellzugriffe auf die Module. Die Rolle viewer sieht nur Lesezugriffe; ab CREATE erscheinen Einstiege zum Anlegen. Für Module ohne VIEW werden Schnellzugriffe automatisch ausgeblendet.
 
-### 5.8 前端路由
+### 5.8 Frontend-Routen
 
-| 页面 | 路由 | 说明 |
+| Seite | Route | Beschreibung |
 |------|------|------|
-| 质量仪表盘 | `/dashboard` | 仅需登录认证，无独立模块守卫 |
+| Qualitäts-Dashboard | `/dashboard` | Nur Anmeldung erforderlich, kein eigener Modulschutz |
 
 ---
 
-## 6. 常见问题
+## 6. Häufige Fragen
 
-### Q1: 为什么无法创建管理评审？
+### F1: Warum kann ich keine Managementbewertung anlegen?
 
-**A:** 管理评审的创建需要 `management_review` 模块的 CREATE (2) 及以上权限。默认配置中，field_qe 和 planning_qe 仅有 VIEW (1) 权限，supplier_qe 和 customer_qe 无权限。请联系管理员调整权限配置。
+**A:** Das Anlegen erfordert mindestens CREATE (2) im Modul `management_review`. In der Standardkonfiguration haben field_qe und planning_qe nur VIEW (1), supplier_qe und customer_qe keine Rechte. Bitte die Berechtigungen vom Administrator anpassen lassen.
 
-### Q2: 管理评审 "采集数据" 后能否修改数据？
+### F2: Können Daten nach „Daten erfassen“ noch geändert werden?
 
-**A:** 采集数据后评审进入 `data_collected` 状态，此时仍可编辑 `manual_inputs`（手动输入项，如顾客满意、内外部因素变化等）和 `attachments`（附件）。自动采集的数据包（`data_package`）本身不可手动修改，但可通过 "刷新数据" (refresh_data) 重新拉取最新数据。
+**A:** Nach dem Erfassen ist die Bewertung im Status `data_collected`; `manual_inputs` (manuelle Eingaben wie Kundenzufriedenheit, Änderungen interner/externer Themen) und `attachments` (Anhänge) bleiben bearbeitbar. Das automatisch erfasste Datenpaket (`data_package`) selbst ist nicht manuell änderbar, lässt sich aber über „Daten aktualisieren“ (refresh_data) neu laden.
 
-### Q3: 管理评审关闭后发现遗漏，怎么办？
+### F3: Nach dem Schließen einer Bewertung fällt eine Lücke auf – was tun?
 
-**A:** 已关闭的评审支持 "重新开启" (reopen_review)，状态从 `closed` 回到 `in_review`，可以继续添加输出或编辑会议纪要，然后再次关闭。
+**A:** Geschlossene Bewertungen lassen sich „wieder öffnen“ (reopen_review); der Status wechselt von `closed` zurück auf `in_review`, Ergebnisse und Protokoll können ergänzt und die Bewertung erneut geschlossen werden.
 
-### Q4: 质量目标的三级层级如何关联？
+### F4: Wie werden die drei Zielebenen verknüpft?
 
-**A:** 创建 level 2（产品线级）目标时必须指定 parent_id 为某个 level 1 目标的 ID；创建 level 3（过程级）目标时 parent_id 必须指向 level 2 目标。系统会自动校验 parent 的 level 是否为当前 level - 1，不匹配时会返回错误。
+**A:** Beim Anlegen eines Ziels der Ebene 2 (Produktlinie) muss parent_id die ID eines Ziels der Ebene 1 sein; bei Ebene 3 (Prozess) muss parent_id auf ein Ziel der Ebene 2 zeigen. Das System prüft, ob das level des übergeordneten Ziels dem aktuellen level - 1 entspricht, und liefert sonst einen Fehler.
 
-### Q5: 质量目标审批被驳回后怎么办？
+### F5: Die Freigabe eines Qualitätsziels wurde zurückgewiesen – was nun?
 
-**A:** 驳回后目标状态回到 `draft`，审批人填写的 `reject_reason` 会记录在目标上。您可以修改后重新提交审批（draft → pending）。
+**A:** Nach einer Zurückweisung ist das Ziel wieder `draft`, die `reject_reason` der freigebenden Person wird am Ziel gespeichert. Nach Überarbeitung kann es erneut eingereicht werden (draft → pending).
 
-### Q6: 仪表盘为什么看不到某些组件？
+### F6: Warum sehe ich manche Widgets nicht?
 
-**A:** 仪表盘组件的可见性取决于关联模块的权限。例如：
-- 高 RPN FMEA 组件需要 `fmea` 模块的 VIEW 权限
-- 逾期 CAPA 组件需要 `capa` 模块的 VIEW 权限
-- SPC 相关组件需要 `spc` 模块的 VIEW 权限
+**A:** Die Sichtbarkeit hängt von den Rechten der verknüpften Module ab, zum Beispiel:
+- „FMEA mit hoher RPN“ erfordert VIEW im Modul `fmea`
+- „Überfällige CAPA“ erfordert VIEW im Modul `capa`
+- SPC-Widgets erfordern VIEW im Modul `spc`
 
-如果某模块权限为 NONE (0)，对应组件会被自动过滤，不会显示在布局中。
+Ist ein Modulrecht NONE (0), wird das Widget automatisch herausgefiltert und nicht im Layout angezeigt.
 
-### Q7: 仪表盘数据可以按产品线筛选吗？
+### F7: Lassen sich Dashboard-Daten nach Produktlinie filtern?
 
-**A:** 可以。仪表盘页面顶部提供产品线选择器，选择后所有数据请求会附带 `product_line` 参数，后端仅返回该产品线范围内的统计数据。
+**A:** Ja. Oben auf der Seite gibt es eine Produktlinienauswahl; danach tragen alle Datenanfragen den Parameter `product_line`, und das Backend liefert nur Statistiken dieser Produktlinie.
 
-### Q8: 管理评审报告支持哪些生成方式？
+### F8: Wie kann der Bericht der Managementbewertung erzeugt werden?
 
-**A:** 支持两种模式：
-- **规则生成** (use_llm = false)：基于数据包模板自动填充各节内容，不依赖 AI
-- **AI 辅助生成** (use_llm = true)：在规则生成的基础上，调用 LLM 生成执行摘要和改进建议，内容更丰富
+**A:** Es gibt zwei Modi:
+- **Regelbasiert** (use_llm = false): füllt die Abschnitte anhand der Vorlage aus dem Datenpaket, ohne KI
+- **KI-gestützt** (use_llm = true): ergänzt die regelbasierte Erzeugung um eine LLM-Zusammenfassung und Verbesserungsvorschläge
 
-两种模式生成的报告均为 `draft` 状态，可以手动编辑后定稿（finalize）为 `final` 状态。
+In beiden Modi ist der erzeugte Bericht im Status `draft`, kann manuell bearbeitet und dann zu `final` finalisiert werden.
 
-### Q9: 质量目标的 target_value 支持哪些格式？
+### F9: Welche Formate unterstützt target_value?
 
-**A:** `target_value` 为字符串类型，支持以下格式：
-- 含比较符号：`≥99%`、`≤50ppm`、`>=95%`、`<=3.4`
-- 纯数值：`100`、`0.5%`
-- 系统在管理评审数据包汇总时会自动解析比较符号，判断 actual_value 是否达标
+**A:** `target_value` ist eine Zeichenkette in folgenden Formaten:
+- Mit Vergleichsoperator: `≥99%`, `≤50ppm`, `>=95%`, `<=3.4`
+- Reine Zahl: `100`, `0.5%`
+- Bei der Zusammenstellung des Datenpakets parst das System den Vergleichsoperator automatisch und beurteilt, ob actual_value das Ziel erreicht
 
-### Q10: 评审输出 (Review Output) 的验证流程是什么？
+### F10: Wie läuft die Verifizierung von Bewertungsergebnissen?
 
-**A:** 评审输出的状态流为 `pending` → `in_progress` → `completed` → `verified`：
-1. 创建输出时为 `pending`（待处理）
-2. 责任人开始执行后标记为 `in_progress`（进行中）
-3. 执行完毕后标记为 `completed`（待验证）
-4. 验证人确认有效后执行 verify 操作，状态变为 `verified`（已验证），同时记录 `verified_by`、`verified_at` 和 `verification_notes`
+**A:** Der Status verläuft `pending` → `in_progress` → `completed` → `verified`:
+1. Beim Anlegen `pending` (offen)
+2. Nach Beginn der Umsetzung durch die verantwortliche Person `in_progress` (in Bearbeitung)
+3. Nach Abschluss der Umsetzung `completed` (wartet auf Verifizierung)
+4. Bestätigt die verifizierende Person die Wirksamkeit, setzt verify den Status `verified` (verifiziert) und erfasst `verified_by`, `verified_at` und `verification_notes`
 
 ---
 
-> **文档编号规则参考：** 管理评审 `MR-{YYYY}-{NNN}`，质量目标 `QG-{YYYY}-{NNN}`
+> **Nummerierungsregeln:** Managementbewertung `MR-{YYYY}-{NNN}`, Qualitätsziele `QG-{YYYY}-{NNN}`

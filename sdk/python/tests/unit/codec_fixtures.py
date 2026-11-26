@@ -48,7 +48,7 @@ def response_cases():
     source = dict(receipt_id=str(U),source_capa_id=str(V),projection_id='capa.d4.summary.masked.v1',projection_digest='a'*64,data_class='internal')
     binding = dict(run_id=str(U),task_id=str(V))
     message = dict(message_id=str(U),sequence=1,content=SECRET)
-    context = dict(receipt_id=str(U),source_capa_id=str(V),report_id=str(V),factory_id=str(U),projection_id=source['projection_id'],data_class='internal',document_no=SECRET,status='draft',severity='一般',product_line_code='line',updated_at='2026-11-03T22:00:00+08:00',projection_digest='a'*64)
+    context = dict(receipt_id=str(U),source_capa_id=str(V),report_id=str(V),factory_id=str(U),projection_id=source['projection_id'],data_class='internal',document_no=SECRET,status='draft',severity='Größe',product_line_code='line',updated_at='2026-11-03T22:00:00+08:00',projection_digest='a'*64)
     return {
         'claim': dict(**binding,token=SECRET,lease_epoch=0,lease_expires_at='2026-11-03T22:00:00+08:00',accepted_message_seq=0,has_resume_checkpoint=False),
         'capabilities': dict(capabilities=[dict(id='future.optional.v1',allowed=True,required=False,projection=None)]),

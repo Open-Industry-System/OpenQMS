@@ -14,7 +14,7 @@ def run(event='pull_request'):
     return dict(id=42, name='Test OpenQMS', path='.github/workflows/test.yml', status='completed', conclusion='success', event=event, head_sha=HEAD, head_branch='feature', repository={'full_name':REPO}, head_repository={'full_name':REPO}, pull_requests=[{'number':7}])
 
 def pr():
-    return dict(number=7, body='<!-- preview-test-plan:start -->\n### 影响范围\n质量报告列表与只读权限。\n### 验收步骤\n| 检查项 | 操作步骤 | 预期结果 |\n| --- | --- | --- |\n| 列表筛选 | 登录并筛选报告状态 | 只显示对应状态报告 |\n### 权限与回归\n只读用户修改应拒绝，刷新后列表筛选保持。\n<!-- preview-test-plan:end -->', state='open', draft=False, user={'login':'alice'}, head={'sha':HEAD,'repo':{'full_name':REPO}}, base={'sha':BASE,'ref':'main','repo':{'full_name':REPO}}, merge_commit_sha=SHA)
+    return dict(number=7, body='<!-- preview-test-plan:start -->\n### Scope\nQuality report list and read-only access.\n### Acceptance steps\n| Check | Steps | Expected result |\n| --- | --- | --- |\n| List filter | Log in and filter by report status | Only reports with that status are shown |\n### Permissions and regression\nRead-only user edits are rejected; the filter persists after refresh.\n<!-- preview-test-plan:end -->', state='open', draft=False, user={'login':'alice'}, head={'sha':HEAD,'repo':{'full_name':REPO}}, base={'sha':BASE,'ref':'main','repo':{'full_name':REPO}}, merge_commit_sha=SHA)
 
 def test_current_trusted_merge():
     assert gate.resolve(run(), REPO, 'main', pr(), 'write', SHA)['sha']==SHA
@@ -217,5 +217,5 @@ def test_missing_preview_plan_blocks_publication():
     api.data['/collaborators/alice/permission'] = {'permission': 'write'}
     api.data['/git/ref/pull/7/merge'] = {'object': {'sha': SHA}}
     api.data[f'/git/commits/{SHA}'] = {'parents': [{'sha': BASE}, {'sha': HEAD}]}
-    with pytest.raises(ValueError, match='验收计划'):
+    with pytest.raises(ValueError, match='acceptance plan'):
         gate.verify(api, 42, REPO)

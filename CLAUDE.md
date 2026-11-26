@@ -164,7 +164,7 @@ PostgreSQL 15 (asyncpg), 50+ tables across 7 modules. Multi-tenant with factory 
 - Backend messages stay in their original (Chinese) source form; `backend/app/i18n` translates JSON responses per `Accept-Language` (catalog `backend/app/i18n/messages.json`) and appends an output-language directive to LLM prompts. Add new user-facing backend messages to the catalog.
 - Document numbering: `PFMEA-2026-001`, `DFMEA-2026-001`, `8D-2026-001`
 - Product line: `DC-DC-100` (seed data default)
-- Severity values (stored data, unchanged): `致命`, `严重`, `一般`, `轻微` — displayed via translations
+- Severity values are stored data in their legacy (Chinese) literal form (fatal / serious / general / minor), unchanged in the DB and displayed via translations
 - Every CRUD operation manually creates an `AuditLog` in its service method
 - FMEA graph nodes carry AIAG-VDA 7-step properties
 - `frontend/src/utils/fmea.ts` has the AIAG-VDA Action Priority lookup table (H/M/L from S×O×D)

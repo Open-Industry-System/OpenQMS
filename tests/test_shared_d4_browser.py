@@ -22,7 +22,7 @@ def fixture_config():
         origin='https://test-acceptance.example.test',
         username='fixture-reviewer', salt=salt.hex(),
         password_digest=hashlib.scrypt(b'fixture-password', salt=salt, n=2**14, r=8, p=1).hex(),
-        report_label='合成 D4 试验报告', executor_socket='/run/openqms-test-fixture.sock',
+        report_label='Synthetic D4 trial report', executor_socket='/run/openqms-test-fixture.sock',
         binding=dict(pr=45, head='a' * 40, merge='b' * 40, plan='c' * 64, lease='d' * 32,
                      report_id=str(uuid4()), issued_at=now, expires_at=now + 3600),
     )
@@ -76,10 +76,10 @@ def test_browser_action_requires_operator_and_origin_before_executor():
         assert fetch(port, 'POST', '/scenario/d4-deliver', origin='https://wrong.test')[0] == 403
         assert fetch(port, 'POST', '/scenario/arbitrary', origin=config['origin'])[0] == 400
         assert not calls
-        assert '合成 D4 试验报告' in fetch(port, 'GET')[1]
+        assert 'Synthetic D4 trial report' in fetch(port, 'GET')[1]
         for scenario, count in [('d4-deliver', '1 → 2'), ('d4-revoke', '1 → 1')]:
             status, body = fetch(port, 'POST', '/scenario/' + scenario, origin=config['origin'])
-            assert status == 200 and '通过' in body and count in body
+            assert status == 200 and 'pass' in body and count in body
             assert calls[-1]['binding'] == config['binding']
             assert calls[-1]['scenario'] == scenario
             assert len(calls[-1]['operation']) == 32
@@ -93,7 +93,7 @@ def test_stale_receipt_or_expired_session_cannot_pass():
 
     with portal(config, invoke) as port:
         status, message = fetch(port, 'POST', '/scenario/d4-deliver', origin=config['origin'])
-        assert status == 503 and '受阻' in message
+        assert status == 503 and 'Blocked' in message
         config['binding']['expires_at'] = 1
         assert fetch(port, 'POST', '/scenario/d4-deliver', origin=config['origin'])[0] == 410
 
@@ -146,7 +146,7 @@ def test_shared_accounts_get_only_their_assigned_scenario(shared_config):
             assert fetch(port, 'POST', f'/scenario/{blocked}', origin=shared_config['origin'], **login)[0] == 403
             assert fetch(port, 'POST', f'/scenario/{allowed}', origin='https://wrong.test', **login)[0] == 403
             status, body = fetch(port, 'POST', f'/scenario/{allowed}', origin=shared_config['origin'], **login)
-            assert status == 200 and '通过' in body
+            assert status == 200 and 'pass' in body
     assert [item['scenario'] for item in requests] == ['d4-deliver', 'd4-revoke']
 
 

@@ -1,74 +1,74 @@
-# 集团/多工厂管理模块 — 用户手册
+# Modul Konzern-/Mehrwerksverwaltung — Benutzerhandbuch
 
-> 最后更新: 2026-06-13 | 适用版本: OpenQMS v1.0
+> Zuletzt aktualisiert: 2026-06-13 | Gilt für: OpenQMS v1.0
 
 ---
 
-## 1. 功能概述
+## 1. Funktionsüberblick
 
-集团/多工厂管理模块（ModuleKey: `group`）为集团管理层提供跨工厂的质量数据聚合、对比与治理能力。在多工厂部署场景下，各工厂数据默认按工厂隔离，而本模块允许集团管理员和经理突破单厂边界，从集团维度统一管控。
+Das Modul Konzern-/Mehrwerksverwaltung (ModuleKey: `group`) bietet der Konzernleitung werksübergreifende Aggregation, Vergleich und Steuerung von Qualitätsdaten. Bei Mehrwerksbetrieb sind die Daten standardmäßig nach Werk getrennt; dieses Modul erlaubt Konzernadministratoren und Managern, über die Grenzen eines Werks hinweg zentral zu steuern.
 
-| 子模块 | 路由 | 功能范围 |
+| Teilmodul | Route | Funktionsumfang |
 |--------|------|----------|
-| 集团看板 | `/group/dashboard` | 跨工厂 KPI 聚合与汇总 |
-| 工厂管理 | `/group/factories` | 工厂的新建、编辑、停用，产品线分配 |
-| 工厂对比 | `/group/comparison` | 各工厂关键指标横向对比 |
-| 集团供应商 | `/group/suppliers` | 跨工厂共享供应商视图与合并 |
-| 集团审核 | `/group/audits` | 跨厂审核计划与发现项跟踪 |
+| Konzern-Dashboard | `/group/dashboard` | Werksübergreifende Aggregation und Zusammenfassung der KPIs |
+| Werksverwaltung | `/group/factories` | Werke anlegen, bearbeiten, deaktivieren; Produktlinien zuordnen |
+| Werksvergleich | `/group/comparison` | Horizontaler Vergleich zentraler Kennzahlen der Werke |
+| Konzernlieferanten | `/group/suppliers` | Werksübergreifende Sicht auf gemeinsame Lieferanten und Zusammenführung |
+| Konzernaudits | `/group/audits` | Werksübergreifende Auditpläne und Verfolgung von Feststellungen |
 
-所有路由均通过 `ProtectedRoute` 守卫，要求当前用户对 `group` 模块至少拥有 VIEW 权限。
+Alle Routen sind über `ProtectedRoute` geschützt und verlangen mindestens VIEW im Modul `group`.
 
 ---
 
-## 2. 适用角色与权限
+## 2. Rollen und Berechtigungen
 
-权限模型采用 **ModuleKey × PermissionLevel × 角色** 三级结构。PermissionLevel 含义：0 = NONE（不可见）、1 = VIEW（只读）、2 = CREATE（可新建）、3 = EDIT（可编辑）、4 = APPROVE（可审批）、5 = ADMIN（完全控制）。
+Das Berechtigungsmodell ist dreistufig: **ModuleKey × PermissionLevel × Rolle**. Bedeutung von PermissionLevel: 0 = NONE (unsichtbar), 1 = VIEW (nur lesen), 2 = CREATE (anlegen), 3 = EDIT (bearbeiten), 4 = APPROVE (freigeben), 5 = ADMIN (Vollzugriff).
 
 | ModuleKey | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
 |-----------|:-----:|:-------:|:--------:|:-----------:|:-----------:|:-----------:|:------:|
 | group | 5 (ADMIN) | 3 (EDIT) | — | — | — | — | — |
 
-> 上表中 `—` 表示该角色在 `group` 模块无权限行（PermissionLevel = NONE），即看不到集团管理菜单和数据。
+> `—` in der Tabelle oben bedeutet, dass die Rolle keine Berechtigungszeile im Modul `group` hat (PermissionLevel = NONE) und weder Menü noch Daten der Konzernverwaltung sieht.
 
-**操作与最低权限对照：**
+**Operationen und Mindestberechtigung:**
 
-| 操作 | 所需 PermissionLevel | 说明 |
+| Operation | Erforderliche PermissionLevel | Beschreibung |
 |------|----------------------|------|
-| 查看集团看板/对比/供应商/审核 | VIEW (1) | admin、manager 可见 |
-| 创建/编辑/停用工厂 | ADMIN (5) | 仅 admin |
-| 合并供应商 | ADMIN (5) | 仅 admin |
-| 添加/移除审核计划中的工厂 | ADMIN (5) | 仅 admin |
+| Konzern-Dashboard/Vergleich/Lieferanten/Audits ansehen | VIEW (1) | Sichtbar für admin, manager |
+| Werke anlegen/bearbeiten/deaktivieren | ADMIN (5) | Nur admin |
+| Lieferanten zusammenführen | ADMIN (5) | Nur admin |
+| Werke zu Auditplänen hinzufügen/entfernen | ADMIN (5) | Nur admin |
 
-**关键设计：** `group` 模块的 ADMIN 权限同时决定了 `FactoryScope` 的解析结果 — 拥有 `group:ADMIN` 的用户其 `accessible_factory_ids` 为 `None`（即全厂可见），而非 ADMIN 用户即使有 VIEW 权限也只能看到自己被分配的工厂数据。
+**Wichtige Designentscheidung:** ADMIN im Modul `group` bestimmt zugleich das Ergebnis von `FactoryScope` — Benutzer mit `group:ADMIN` haben `accessible_factory_ids` = `None` (alle Werke sichtbar), Benutzer ohne ADMIN sehen selbst mit VIEW nur die ihnen zugeordneten Werke.
 
 ---
 
-## 3. 集团看板
+## 3. Konzern-Dashboard
 
-**路由：** `/group/dashboard`
+**Route:** `/group/dashboard`
 
-### 3.1 功能说明
+### 3.1 Funktionsbeschreibung
 
-集团看板汇总所有可见工厂的质量 KPI，以卡片形式呈现集团整体和各工厂的运营状态。
+Das Konzern-Dashboard fasst die Qualitäts-KPIs aller sichtbaren Werke zusammen und zeigt den Betriebszustand des Konzerns und der einzelnen Werke als Karten.
 
-### 3.2 看板指标
+### 3.2 Kennzahlen
 
-| 指标 | 数据来源 | 说明 |
+| Kennzahl | Datenquelle | Beschreibung |
 |------|----------|------|
-| 开放 FMEA (`open_fmea_count`) | `fmea_documents` | 状态为 `draft` 或 `in_review` 的 FMEA 数量 |
-| 开放 CAPA (`open_capa_count`) | `capa_eightd` | 状态未到 `D8_CLOSURE` 或 `ARCHIVED` 的 8D 报告数量 |
-| 逾期 CAPA (`overdue_capa_count`) | `capa_eightd` | 开放且 `due_date < 今天` 的 8D 报告数量，逾期值以红色高亮 |
-| SPC 告警 (`active_spc_alarms`) | `spc_alarms` | 状态为 `open` 的 SPC 告警数量 |
-| 待检 IQC (`pending_iqc_inspections`) | `iqc_inspections` | 状态为 `pending` 的来料检验数量 |
-| 开放 SCAR (`open_scars`) | `supplier_scars` | 状态非 `closed`/`cancelled` 的 SCAR 数量 |
-| 供应商风险告警 (`open_supplier_risk_alerts`) | `supplier_risk_alerts` | 状态为 `open` 的风险告警数量 |
-| 近期审核发现项 (`recent_audit_findings`) | `audit_findings` | 最近 90 天内创建的审核发现项数量 |
+| Offene FMEAs (`open_fmea_count`) | `fmea_documents` | Anzahl FMEAs im Status `draft` oder `in_review` |
+| Offene CAPAs (`open_capa_count`) | `capa_eightd` | Anzahl 8D-Berichte, die `D8_CLOSURE` oder `ARCHIVED` noch nicht erreicht haben |
+| Überfällige CAPAs (`overdue_capa_count`) | `capa_eightd` | Anzahl offener 8D-Berichte mit `due_date < heute`, rot hervorgehoben |
+| SPC-Alarme (`active_spc_alarms`) | `spc_alarms` | Anzahl SPC-Alarme im Status `open` |
+| Offene IQC-Prüfungen (`pending_iqc_inspections`) | `iqc_inspections` | Anzahl Wareneingangsprüfungen im Status `pending` |
+| Offene SCARs (`open_scars`) | `supplier_scars` | Anzahl SCARs mit Status weder `closed` noch `cancelled` |
+| Lieferanten-Risikowarnungen (`open_supplier_risk_alerts`) | `supplier_risk_alerts` | Anzahl Risikowarnungen im Status `open` |
+| Aktuelle Auditfeststellungen (`recent_audit_findings`) | `audit_findings` | Anzahl in den letzten 90 Tagen angelegter Auditfeststellungen |
 
-### 3.3 页面结构
+### 3.3 Seitenaufbau
 
-- **顶部汇总行：** 集团合计值（`factory_name = "合计"`），6 张 KPI 卡片横向排列
-- **各工厧行：** 每个可见工厂一张卡片，内部以 3×2 网格展示该厂 6 项指标
-- 逾期 CAPA 数值 > 0 时自动标红 (`#cf1322`)
+- **Summenzeile oben:** Konzernsumme (`factory_name` ist die Summenbezeichnung), 6 KPI-Karten nebeneinander
+- **Zeilen je Werk:** Je sichtbarem Werk eine Karte mit den 6 Kennzahlen im 3×2-Raster
+- Überfällige CAPAs > 0 werden automatisch rot markiert (`#cf1322`)
 
 ### 3.4 API
 
@@ -76,9 +76,9 @@
 GET /api/group/dashboard
 ```
 
-**权限：** `group` 模块 VIEW 及以上
+**Berechtigung:** mindestens VIEW im Modul `group`
 
-**响应：**
+**Antwort:**
 
 ```json
 {
@@ -86,7 +86,7 @@ GET /api/group/dashboard
     {
       "factory_id": "uuid",
       "factory_code": "DEFAULT",
-      "factory_name": "默认工厂",
+      "factory_name": "Standardwerk",
       "open_fmea_count": 5,
       "open_capa_count": 3,
       "overdue_capa_count": 1,
@@ -100,176 +100,176 @@ GET /api/group/dashboard
   "totals": {
     "factory_id": "00000000-0000-0000-0000-000000000000",
     "factory_code": "",
-    "factory_name": "合计",
+    "factory_name": "Summe",
     ...
   },
   "snapshot_date": null
 }
 ```
 
-`totals.factory_id` 使用零 UUID (`00000000-0000-0000-0000-000000000000`) 作为占位标识。
+`totals.factory_id` verwendet die Null-UUID (`00000000-0000-0000-0000-000000000000`) als Platzhalter.
 
 ---
 
-## 4. 工厂管理
+## 4. Werksverwaltung
 
-**路由：** `/group/factories`
+**Route:** `/group/factories`
 
-### 4.1 功能说明
+### 4.1 Funktionsbeschreibung
 
-工厂管理页面用于维护工厂主数据，包括新建、编辑和停用工厂。工厂是 OpenQMS 多租户隔离的核心维度 — 所有业务记录（FMEA、CAPA、SPC 等）均通过 `factory_id` 字段归属到某个工厂。
+Die Werksverwaltung pflegt die Stammdaten der Werke: anlegen, bearbeiten und deaktivieren. Das Werk ist die zentrale Trennungsdimension in OpenQMS — alle Geschäftsdatensätze (FMEA, CAPA, SPC usw.) gehören über das Feld `factory_id` zu einem Werk.
 
-### 4.2 工厂数据模型
+### 4.2 Datenmodell Werk
 
-| 字段 | 类型 | 必填 | 说明 |
+| Feld | Typ | Pflicht | Beschreibung |
 |------|------|:----:|------|
-| `code` | String(20) | 创建时必填 | 工厂编码，全局唯一，如 `DEFAULT`、`SH-02`。创建后不可修改 |
-| `name` | String(100) | 是 | 工厂名称，如 `默认工厂`、`上海工厂` |
-| `location` | String(200) | 否 | 工厂地址，如 `上海市浦东新区` |
-| `is_active` | Boolean | 默认 true | 启用/停用标记 |
+| `code` | String(20) | Pflicht beim Anlegen | Werkscode, global eindeutig, z. B. `DEFAULT`, `SH-02`. Nach dem Anlegen nicht änderbar |
+| `name` | String(100) | Ja | Werksname, z. B. `Standardwerk`, `Werk Shanghai` |
+| `location` | String(200) | Nein | Werksadresse, z. B. `Pudong, Shanghai` |
+| `is_active` | Boolean | Standard true | Kennzeichen aktiv/deaktiviert |
 
-### 4.3 新建工厂
+### 4.3 Werk anlegen
 
 **API：** `POST /api/group/factories`
 
-**权限：** `group` 模块 ADMIN (5)
+**Berechtigung:** ADMIN (5) im Modul `group`
 
-请求体：
+Request-Body:
 
 ```json
 {
   "code": "GZ-03",
-  "name": "广州工厂",
-  "location": "广州市黄埔区"
+  "name": "Werk Guangzhou",
+  "location": "Huangpu, Guangzhou"
 }
 ```
 
-- `code` 不能与已有工厂编码重复，否则返回 `400`
-- 新建工厂默认 `is_active = true`
+- `code` darf keinem vorhandenen Werkscode entsprechen, sonst `400`
+- Neue Werke haben standardmäßig `is_active = true`
 
-### 4.4 编辑工厂
+### 4.4 Werk bearbeiten
 
 **API：** `PUT /api/group/factories/{fid}`
 
-**权限：** `group` 模块 ADMIN (5)
+**Berechtigung:** ADMIN (5) im Modul `group`
 
-请求体（仅传需要修改的字段）：
+Request-Body (nur zu ändernde Felder):
 
 ```json
 {
-  "name": "广州工厂（新址）",
-  "location": "广州市南沙区",
+  "name": "Werk Guangzhou (neuer Standort)",
+  "location": "Nansha, Guangzhou",
   "is_active": true
 }
 ```
 
-- `code` 不可通过编辑修改
-- 每次变更会写入 `audit_logs` 表
+- `code` kann beim Bearbeiten nicht geändert werden
+- Jede Änderung wird in die Tabelle `audit_logs` geschrieben
 
-### 4.5 停用工厂
+### 4.5 Werk deaktivieren
 
 **API：** `DELETE /api/group/factories/{fid}`
 
-**权限：** `group` 模块 ADMIN (5)
+**Berechtigung:** ADMIN (5) im Modul `group`
 
-- 停用操作将 `is_active` 设为 `false`，而非物理删除
-- 如果该工厂仍有活跃产品线引用（`product_lines.factory_id` 下有 `is_active = true` 的记录），则停用失败并返回 `400`：`"工厂 '{code}' 仍被 N 条活跃产品线引用，无法停用"`
-- 必须先将关联产品线停用或迁移到其他工厂后才能停用工厂本身
-- 已停用的工厂不再出现在看板、对比等聚合数据中
+- Das Deaktivieren setzt `is_active` auf `false`, statt physisch zu löschen
+- Wird das Werk noch von aktiven Produktlinien referenziert (Datensätze mit `is_active = true` unter `product_lines.factory_id`), schlägt das Deaktivieren mit `400` fehl: Meldung, dass das Werk noch von N aktiven Produktlinien referenziert wird
+- Zuerst die verknüpften Produktlinien deaktivieren oder in ein anderes Werk verschieben, dann das Werk deaktivieren
+- Deaktivierte Werke erscheinen nicht mehr in aggregierten Daten wie Dashboard und Vergleich
 
-### 4.6 产品线与工厂的关联
+### 4.6 Zuordnung von Produktlinien zu Werken
 
-产品线通过 `product_lines.factory_id` 关联到工厂。在当前版本中，产品线的工厂归属通过以下方式设定：
+Produktlinien sind über `product_lines.factory_id` einem Werk zugeordnet. In der aktuellen Version wird die Zuordnung so festgelegt:
 
-- 种子数据中，`DC-DC-100` 和 `PCB-SMT-200` 属于 `DEFAULT` 工厂，`SH-DC-200` 属于 `SH-02`（上海工厂）
-- 新建产品线时，`factory_id` 由 `resolve_create_factory_id` 自动推导：优先使用产品线绑定的工厂，否则取用户的 `default_factory_id`
+- In den Seed-Daten gehören `DC-DC-100` und `PCB-SMT-200` zum Werk `DEFAULT`, `SH-DC-200` zu `SH-02` (Werk Shanghai)
+- Beim Anlegen einer Produktlinie leitet `resolve_create_factory_id` die `factory_id` automatisch ab: bevorzugt das an die Produktlinie gebundene Werk, sonst `default_factory_id` des Benutzers
 
 ---
 
-## 5. 工厂对比
+## 5. Werksvergleich
 
-**路由：** `/group/comparison`
+**Route:** `/group/comparison`
 
-### 5.1 功能说明
+### 5.1 Funktionsbeschreibung
 
-工厂对比页面将各工厂的关键指标以横向表格形式呈现，方便管理层快速识别差异和问题工厂。
+Der Werksvergleich zeigt die zentralen Kennzahlen der Werke in einer horizontalen Tabelle, damit die Leitung Unterschiede und Problemwerke schnell erkennt.
 
-### 5.2 对比指标
+### 5.2 Vergleichskennzahlen
 
-默认对比以下 8 项指标（与看板 KPI 一致）：
+Standardmäßig werden 8 Kennzahlen verglichen (wie die Dashboard-KPIs):
 
-| 指标键 | 中文名 |
+| Kennzahlschlüssel | Bezeichnung |
 |--------|--------|
-| `open_fmea_count` | 开放 FMEA |
-| `open_capa_count` | 开放 CAPA |
-| `overdue_capa_count` | 逾期 CAPA |
-| `active_spc_alarms` | SPC 告警 |
-| `pending_iqc_inspections` | 待检 IQC |
-| `open_scars` | 开放 SCAR |
-| `open_supplier_risk_alerts` | 供应商风险告警 |
-| `recent_audit_findings` | 近期审核发现项 |
+| `open_fmea_count` | Offene FMEAs |
+| `open_capa_count` | Offene CAPAs |
+| `overdue_capa_count` | Überfällige CAPAs |
+| `active_spc_alarms` | SPC-Alarme |
+| `pending_iqc_inspections` | Offene IQC-Prüfungen |
+| `open_scars` | Offene SCARs |
+| `open_supplier_risk_alerts` | Lieferanten-Risikowarnungen |
+| `recent_audit_findings` | Aktuelle Auditfeststellungen |
 
-可通过 `metric_names` 查询参数筛选指定指标，例如：
+Über den Abfrageparameter `metric_names` lassen sich bestimmte Kennzahlen wählen, zum Beispiel:
 
 ```
 GET /api/group/comparison?metric_names=open_capa_count,overdue_capa_count,active_spc_alarms
 ```
 
-### 5.3 页面展示
+### 5.3 Darstellung
 
-表格左列固定显示 `factory_code` 和 `factory_name`，其余列按请求的 `metric_names` 动态生成。单元格值为 `null` 时显示 `-`。
+Die linke Spalte zeigt fest `factory_code` und `factory_name`, die übrigen Spalten entstehen dynamisch aus den angefragten `metric_names`. Zellen mit `null` zeigen `-`.
 
-### 5.4 数据来源
+### 5.4 Datenquelle
 
-对比数据复用集团看板的聚合逻辑（`get_group_dashboard`），从相同数据源计算各工厂指标后提取为键值对。`accessible_factory_ids` 过滤逻辑与看板一致。
+Der Vergleich nutzt die Aggregationslogik des Konzern-Dashboards (`get_group_dashboard`), berechnet die Kennzahlen der Werke aus denselben Quellen und extrahiert sie als Schlüssel-Wert-Paare. Der Filter `accessible_factory_ids` entspricht dem Dashboard.
 
 ---
 
-## 6. 集团供应商
+## 6. Konzernlieferanten
 
-**路由：** `/group/suppliers`
+**Route:** `/group/suppliers`
 
-### 6.1 功能说明
+### 6.1 Funktionsbeschreibung
 
-集团供应商页面展示在多个工厂都有记录的共享供应商，通过 `SupplierSharedProfile`（供应商共享档案）实现跨工厂供应商的统一视图和评价聚合。
+Die Seite Konzernlieferanten zeigt gemeinsame Lieferanten mit Datensätzen in mehreren Werken und bietet über `SupplierSharedProfile` (gemeinsames Lieferantenprofil) eine einheitliche Sicht und aggregierte Bewertung.
 
-### 6.2 共享供应商列表
+### 6.2 Liste gemeinsamer Lieferanten
 
 **API：** `GET /api/group/suppliers`
 
-**权限：** `group` 模块 VIEW 及以上
+**Berechtigung:** mindestens VIEW im Modul `group`
 
-列表仅展示在 **2 个及以上工厂** 都有供应商记录的共享档案，即同一供应商在不同工厂以不同 `supplier_id` 存在但通过 `shared_profile_id` 关联。
+Die Liste zeigt nur gemeinsame Profile mit Lieferantendatensätzen in **2 oder mehr Werken**, also denselben Lieferanten mit unterschiedlicher `supplier_id` je Werk, verknüpft über `shared_profile_id`.
 
-返回字段：
+Gelieferte Felder:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `shared_profile_id` | 共享档案 UUID |
-| `unified_credit_code` | 统一社会信用代码 |
-| `name` | 供应商名称 |
-| `short_name` | 简称 |
-| `industry` | 所属行业 |
-| `factory_evaluations` | 各工厂评价列表 |
+| `shared_profile_id` | UUID des gemeinsamen Profils |
+| `unified_credit_code` | Einheitlicher Sozialkreditcode (Unternehmenskennung) |
+| `name` | Lieferantenname |
+| `short_name` | Kurzname |
+| `industry` | Branche |
+| `factory_evaluations` | Liste der Bewertungen je Werk |
 
-`factory_evaluations` 每项包含：
+Jeder Eintrag in `factory_evaluations` enthält:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `factory_id` | 工厂 UUID |
-| `factory_code` | 工厂编码 |
-| `grade` | 评价等级/状态 |
-| `total_score` | 评分 |
+| `factory_id` | Werks-UUID |
+| `factory_code` | Werkscode |
+| `grade` | Bewertungsstufe/-status |
+| `total_score` | Punktzahl |
 
-### 6.3 合并供应商
+### 6.3 Lieferanten zusammenführen
 
 **API：** `POST /api/group/suppliers/merge`
 
-**权限：** `group` 模块 ADMIN (5)
+**Berechtigung:** ADMIN (5) im Modul `group`
 
-当集团管理员发现不同工厂存在同一供应商的多条记录时，可以合并为一个共享档案。
+Stellt ein Konzernadministrator mehrere Datensätze desselben Lieferanten in verschiedenen Werken fest, können sie zu einem gemeinsamen Profil zusammengeführt werden.
 
-请求体：
+Request-Body:
 
 ```json
 {
@@ -278,199 +278,199 @@ GET /api/group/comparison?metric_names=open_capa_count,overdue_capa_count,active
 }
 ```
 
-- `supplier_ids`：至少提供 2 个不同工厂的供应商 ID
-- `shared_profile_id`：可选，如不传则自动创建新的共享档案
-- 合并要求所有供应商记录来自 **不同工厂**（即 `factory_id` 各不相同），否则返回 `400`
-- 合并后各供应商记录的 `shared_profile_id` 更新为统一档案 ID
+- `supplier_ids`: mindestens 2 Lieferanten-IDs aus verschiedenen Werken
+- `shared_profile_id`: optional; ohne Angabe wird automatisch ein neues gemeinsames Profil angelegt
+- Alle Lieferantendatensätze müssen aus **verschiedenen Werken** stammen (unterschiedliche `factory_id`), sonst `400`
+- Danach wird `shared_profile_id` aller Datensätze auf die ID des gemeinsamen Profils gesetzt
 
 ---
 
-## 7. 集团审核
+## 7. Konzernaudits
 
-**路由：** `/group/audits`
+**Route:** `/group/audits`
 
-### 7.1 功能说明
+### 7.1 Funktionsbeschreibung
 
-集团审核页面展示涉及多个工厂的审核计划（`AuditProgram`），支持跨厂审核的统筹和跟踪。
+Die Seite Konzernaudits zeigt Auditprogramme (`AuditProgram`) mit mehreren Werken und unterstützt die Koordination und Verfolgung werksübergreifender Audits.
 
-### 7.2 跨厂审核列表
+### 7.2 Liste werksübergreifender Audits
 
 **API：** `GET /api/group/audits`
 
-**权限：** `group` 模块 VIEW 及以上
+**Berechtigung:** mindestens VIEW im Modul `group`
 
-仅展示关联了 **2 个及以上工厂** 的审核计划（通过 `audit_program_target_factories` 表判断）。
+Es werden nur Auditprogramme mit **2 oder mehr Werken** angezeigt (ermittelt über die Tabelle `audit_program_target_factories`).
 
-返回字段：
+Gelieferte Felder:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `program_id` | 审核计划 UUID |
-| `program_no` | 审核编号 |
-| `audit_type` | 审核类型 |
-| `status` | 状态（`planned` / `in_progress` / `completed` / `cancelled`） |
-| `target_factory_ids` | 涉及的工厂 ID 列表 |
-| `target_factory_codes` | 涉及的工厂编码列表 |
-| `finding_count` | 该审核计划的发现项总数 |
+| `program_id` | UUID des Auditprogramms |
+| `program_no` | Auditnummer |
+| `audit_type` | Auditart |
+| `status` | Status (`planned` / `in_progress` / `completed` / `cancelled`) |
+| `target_factory_ids` | Liste der beteiligten Werks-IDs |
+| `target_factory_codes` | Liste der beteiligten Werkscodes |
+| `finding_count` | Anzahl Feststellungen des Auditprogramms |
 
-页面使用 Ant Design `Tag` 组件显示状态，颜色映射：
+Die Seite zeigt den Status mit der Ant-Design-Komponente `Tag`, Farbzuordnung:
 
-| 状态 | 颜色 |
+| Status | Farbe |
 |------|------|
-| `planned` | 蓝色 |
-| `in_progress` | 橙色 |
-| `completed` | 绿色 |
-| `cancelled` | 红色 |
+| `planned` | Blau |
+| `in_progress` | Orange |
+| `completed` | Grün |
+| `cancelled` | Rot |
 
-### 7.3 审核计划的工厂管理
+### 7.3 Werke eines Auditprogramms verwalten
 
-集团管理员可为审核计划添加或移除目标工厂：
+Konzernadministratoren können Zielwerke zu Auditprogrammen hinzufügen oder entfernen:
 
-**添加工厂：**
+**Werk hinzufügen:**
 
 ```
 POST /api/group/audits/{program_id}/factories
 ```
 
-请求体：
+Request-Body:
 ```json
 {
   "factory_id": "uuid"
 }
 ```
 
-**移除工厂：**
+**Werk entfernen:**
 
 ```
 DELETE /api/group/audits/{program_id}/factories/{fid}
 ```
 
-两项操作均需 `group` 模块 ADMIN (5) 权限。
+Beide Operationen erfordern ADMIN (5) im Modul `group`.
 
-**查看审核计划的目标工厂：**
+**Zielwerke eines Auditprogramms ansehen:**
 
 ```
 GET /api/group/audits/{program_id}/factories
 ```
 
-返回 `AuditProgramFactoriesResponse`，包含 `program_id`、`factory_ids`、`factory_codes`。
+Liefert `AuditProgramFactoriesResponse` mit `program_id`, `factory_ids`, `factory_codes`.
 
 ---
 
-## 8. 工厂数据隔离
+## 8. Datentrennung nach Werk
 
-### 8.1 设计原则
+### 8.1 Gestaltungsprinzipien
 
-OpenQMS 采用 **三层作用域模型** 实现数据隔离：
+OpenQMS trennt Daten über ein **dreistufiges Scope-Modell**:
 
-| 层级 | 类 | 作用 | 解析方式 |
+| Ebene | Klasse | Aufgabe | Auflösung |
 |------|-----|------|----------|
-| 工厂作用域 | `FactoryScope` | 控制用户可访问哪些工厂的数据 | `resolve_factory_scope()` |
-| 产品线作用域 | `ProductLineScope` | 控制用户可访问哪些产品线的数据 | `resolve_product_line_scope()` |
-| 权限作用域 | `PermissionScope` | 控制用户可执行的操作级别 | `get_user_permission()` |
+| Werksbereich | `FactoryScope` | Steuert, auf welche Werke ein Benutzer zugreifen darf | `resolve_factory_scope()` |
+| Produktlinienbereich | `ProductLineScope` | Steuert, auf welche Produktlinien ein Benutzer zugreifen darf | `resolve_product_line_scope()` |
+| Berechtigungsbereich | `PermissionScope` | Steuert die erlaubte Operationsstufe | `get_user_permission()` |
 
-**关键设计：** `bypass_row_level_security` 仅绕过产品线过滤，不绕过工厂作用域。跨工厂可见性 **仅由 `Module.GROUP` 的 ADMIN 权限决定**。
+**Wichtige Designentscheidung:** `bypass_row_level_security` umgeht nur den Produktlinienfilter, nicht den Werksbereich. Werksübergreifende Sichtbarkeit wird **ausschließlich durch ADMIN in `Module.GROUP` bestimmt**.
 
-### 8.2 FactoryScope 解析规则
+### 8.2 Auflösungsregeln von FactoryScope
 
-`resolve_factory_scope()` 按以下优先级确定用户的工厂可见范围：
+`resolve_factory_scope()` bestimmt den Werksbereich in dieser Reihenfolge:
 
-| 优先级 | 条件 | 结果 | 说明 |
+| Priorität | Bedingung | Ergebnis | Beschreibung |
 |:------:|------|------|------|
-| 1 | 拥有 `group:ADMIN` 权限 | `accessible_factory_ids = None` | `None` 代表全厂可见，不做工厂过滤 |
-| 2 | 在 `user_factories` 表中有记录 | `accessible_factory_ids = [被分配的工厂ID列表]` | 仅可见被分配的工厂 |
-| 3 | 无 `user_factories` 记录但有 `users.factory_id` | `accessible_factory_ids = [用户默认工厂]` | 单厂用户锁定在归属工厂 |
-| 4 | 既无 `user_factories` 也无 `factory_id` | `accessible_factory_ids = []` | 无数据访问 |
+| 1 | Berechtigung `group:ADMIN` vorhanden | `accessible_factory_ids = None` | `None` bedeutet: alle Werke sichtbar, kein Werksfilter |
+| 2 | Einträge in Tabelle `user_factories` vorhanden | `accessible_factory_ids = [Liste der zugeordneten Werks-IDs]` | Nur zugeordnete Werke sichtbar |
+| 3 | Keine Einträge in `user_factories`, aber `users.factory_id` gesetzt | `accessible_factory_ids = [Standardwerk des Benutzers]` | Einzelwerksbenutzer bleibt auf sein Werk beschränkt |
+| 4 | Weder `user_factories` noch `factory_id` | `accessible_factory_ids = []` | Kein Datenzugriff |
 
-### 8.3 用户-工厂关联
+### 8.3 Zuordnung Benutzer–Werk
 
-用户与工厂的关联通过 `user_factories` 表（`UserFactory` 模型）实现：
+Benutzer und Werke werden über die Tabelle `user_factories` (Modell `UserFactory`) verknüpft:
 
 ```python
 class UserFactory(Base):
     __tablename__ = "user_factories"
     __table_args__ = (UniqueConstraint("user_id", "factory_id"),)
-    id: Mapped[uuid.UUID]        # 主键
-    user_id: Mapped[uuid.UUID]    # 外键 → users.user_id
-    factory_id: Mapped[uuid.UUID] # 外键 → factories.id
+    id: Mapped[uuid.UUID]        # Primärschlüssel
+    user_id: Mapped[uuid.UUID]    # Fremdschlüssel → users.user_id
+    factory_id: Mapped[uuid.UUID] # Fremdschlüssel → factories.id
 ```
 
-- 一个用户可关联多个工厂（多对多）
-- 用户还有一个 `factory_id` 字段作为默认工厂（用于创建记录时的默认归属）
-- `default_factory_id` 在 `FactoryScope` 中用于新记录自动填充
+- Ein Benutzer kann mehreren Werken zugeordnet sein (n:m)
+- Zusätzlich hat jeder Benutzer ein Feld `factory_id` als Standardwerk (Standardzugehörigkeit neuer Datensätze)
+- `default_factory_id` dient in `FactoryScope` zum automatischen Befüllen neuer Datensätze
 
-### 8.4 数据查询中的工厂过滤
+### 8.4 Werksfilter in Datenabfragen
 
-所有集团模块的 API 通过 `accessible_factory_ids` 参数传递工厂过滤：
+Alle APIs des Konzernmoduls übergeben den Werksfilter über `accessible_factory_ids`:
 
-- 当 `accessible_factory_ids = None` 时：SQL 查询不添加工厂过滤条件，返回所有工厂数据
-- 当 `accessible_factory_ids = [id1, id2, ...]` 时：SQL 查询添加 `WHERE factory_id IN (...)` 条件
-- 当 `accessible_factory_ids = []` 时：查询返回空结果
+- Bei `accessible_factory_ids = None`: kein Werksfilter im SQL, Daten aller Werke
+- Bei `accessible_factory_ids = [id1, id2, ...]`: SQL erhält die Bedingung `WHERE factory_id IN (...)`
+- Bei `accessible_factory_ids = []`: leeres Ergebnis
 
-在非集团模块中，`apply_scope_filter()` 函数对查询施加两层过滤：
-1. **工厂层**：`model.factory_id == effective_factory_id` 或 `IN accessible_factory_ids`
-2. **产品线层**：根据 `ProductLineScope` 模式过滤 `product_line_code`
+In anderen Modulen wendet `apply_scope_filter()` zwei Filterebenen an:
+1. **Werksebene**: `model.factory_id == effective_factory_id` bzw. `IN accessible_factory_ids`
+2. **Produktlinienebene**: Filter auf `product_line_code` je nach Modus von `ProductLineScope`
 
-### 8.5 新记录的 factory_id 推导
+### 8.5 Ableitung der factory_id neuer Datensätze
 
-创建新记录时，`resolve_create_factory_id()` 按以下优先级确定 `factory_id`：
+Beim Anlegen bestimmt `resolve_create_factory_id()` die `factory_id` in dieser Reihenfolge:
 
-1. 如果提供了 `product_line_code`，取 `ProductLine[code].factory_id`
-2. 取 `scope.effective_factory_id`（请求中指定的工厂）
-3. 取 `scope.factory_scope.default_factory_id`（用户的默认工厂）
-4. 以上均无法确定时报错
+1. Ist `product_line_code` angegeben, wird `ProductLine[code].factory_id` verwendet
+2. Sonst `scope.effective_factory_id` (in der Anfrage angegebenes Werk)
+3. Sonst `scope.factory_scope.default_factory_id` (Standardwerk des Benutzers)
+4. Lässt sich nichts davon bestimmen, wird ein Fehler gemeldet
 
-推导完成后调用 `check_factory_access()` 验证该工厂在用户可见范围内。
+Danach prüft `check_factory_access()`, ob das Werk im sichtbaren Bereich des Benutzers liegt.
 
-### 8.6 种子数据中的工厂配置
+### 8.6 Werkskonfiguration in den Seed-Daten
 
-| 工厂 | Code | 产品线 | 说明 |
+| Werk | Code | Produktlinien | Beschreibung |
 |------|------|--------|------|
-| 默认工厂 | `DEFAULT` | DC-DC-100, PCB-SMT-200 | 初始种子数据归属的主工厂 |
-| 上海工厂 | `SH-02` | SH-DC-200 | 第二个工厂 |
+| Standardwerk | `DEFAULT` | DC-DC-100, PCB-SMT-200 | Hauptwerk der ursprünglichen Seed-Daten |
+| Werk Shanghai | `SH-02` | SH-DC-200 | Zweites Werk |
 
-| 用户 | 可见工厂 | 默认工厂 | 角色 |
+| Benutzer | Sichtbare Werke | Standardwerk | Rolle |
 |------|----------|----------|------|
 | admin | DEFAULT, SH-02 | DEFAULT | admin |
 | manager | DEFAULT, SH-02 | DEFAULT | manager |
 | engineer | DEFAULT | DEFAULT | field_qe |
 | viewer | DEFAULT | DEFAULT | viewer |
-| groupadmin | DEFAULT, SH-02 | 无（集团视角） | admin |
+| groupadmin | DEFAULT, SH-02 | Keine (Konzernsicht) | admin |
 
-`groupadmin` 用户 (`GroupAdmin@2026`) 是专门为集团管理设计的账户，拥有 `group:ADMIN` 权限，可以看到所有工厂数据。
+Der Benutzer `groupadmin` (`GroupAdmin@2026`) ist ein eigenes Konto für die Konzernverwaltung mit `group:ADMIN` und sieht die Daten aller Werke.
 
 ---
 
-## 9. 常见问题
+## 9. Häufige Fragen
 
-### Q1: 为什么某些用户看不到集团管理菜单？
+### F1: Warum sehen manche Benutzer das Menü der Konzernverwaltung nicht?
 
-**A:** 集团管理菜单仅对拥有 `group` 模块权限的角色可见。默认配置中，只有 `admin`（ADMIN）和 `manager`（EDIT）角色有此权限。其他角色（如 `field_qe`、`viewer`）的 `group` 权限为 NONE，看不到菜单入口。
+**A:** Das Menü ist nur für Rollen mit Rechten im Modul `group` sichtbar. Standardmäßig haben nur `admin` (ADMIN) und `manager` (EDIT) dieses Recht. Andere Rollen (z. B. `field_qe`, `viewer`) haben für `group` NONE und sehen keinen Menüeintrag.
 
-### Q2: manager 角色能看到所有工厂的数据吗？
+### F2: Sieht die Rolle manager die Daten aller Werke?
 
-**A:** 不一定。manager 对 `group` 模块有 EDIT (3) 权限，可以看到集团看板等页面，但其 `FactoryScope` 取决于 `user_factories` 分配。只有在 `user_factories` 表中被分配到多个工厂的 manager 才能看到多厂数据。如果 manager 只被分配了一个工厂，则只能看到该工厂数据。`group:ADMIN` (5) 权限才会使 `accessible_factory_ids = None`（全厂可见）。
+**A:** Nicht unbedingt. manager hat EDIT (3) im Modul `group` und sieht Seiten wie das Konzern-Dashboard, der `FactoryScope` hängt aber von der Zuordnung in `user_factories` ab. Nur Manager, die dort mehreren Werken zugeordnet sind, sehen Daten mehrerer Werke; bei nur einem Werk nur dessen Daten. Erst `group:ADMIN` (5) ergibt `accessible_factory_ids = None` (alle Werke sichtbar).
 
-### Q3: 如何停用一个工厂？
+### F3: Wie deaktiviere ich ein Werk?
 
-**A:** 进入 `/group/factories`，在操作列点击"停用"按钮。停用前需确保该工厂没有活跃产品线引用，否则系统会提示错误。需先将关联的产品线停用或迁移后才能停用工厂。停用操作需 `group:ADMIN` 权限。
+**A:** `/group/factories` öffnen und in der Aktionsspalte auf „Deaktivieren“ klicken. Das Werk darf nicht mehr von aktiven Produktlinien referenziert werden, sonst meldet das System einen Fehler. Verknüpfte Produktlinien zuvor deaktivieren oder verschieben. Das Deaktivieren erfordert `group:ADMIN`.
 
-### Q4: 合并供应商时提示"至少需要两个供应商记录"，是什么意思？
+### F4: Beim Zusammenführen von Lieferanten erscheint „mindestens zwei Lieferantendatensätze erforderlich“ – was heißt das?
 
-**A:** 供应商合并功能用于将不同工厂中同一供应商的多条记录统一到一个 `SupplierSharedProfile`。需要至少选择 2 个来自 **不同工厂** 的供应商 ID 才能执行合并。同一工厂内的供应商记录不能合并。
+**A:** Die Zusammenführung vereinigt mehrere Datensätze desselben Lieferanten aus verschiedenen Werken in einem `SupplierSharedProfile`. Dafür müssen mindestens 2 Lieferanten-IDs aus **verschiedenen Werken** gewählt werden. Datensätze desselben Werks können nicht zusammengeführt werden.
 
-### Q5: 工厂对比页面的数据可以自定义指标吗？
+### F5: Lassen sich die Kennzahlen des Werksvergleichs anpassen?
 
-**A:** 可以。通过 URL 参数 `metric_names` 指定要对比的指标，例如 `/api/group/comparison?metric_names=open_capa_count,overdue_capa_count`。前端当前使用默认全部指标，未来可扩展为用户可选。
+**A:** Ja. Der URL-Parameter `metric_names` legt die zu vergleichenden Kennzahlen fest, z. B. `/api/group/comparison?metric_names=open_capa_count,overdue_capa_count`. Das Frontend verwendet derzeit standardmäßig alle Kennzahlen; eine Auswahl durch Benutzer ist künftig möglich.
 
-### Q6: 集团看板上的"合计"行数据是怎么算的？
+### F6: Wie wird die Summenzeile im Konzern-Dashboard berechnet?
 
-**A:** "合计"行是所有可见工厂对应指标的简单求和。`factory_id` 为零 UUID (`00000000-0000-0000-0000-000000000000`)，`factory_code` 为空，`factory_name` 为"合计"。这不是一个独立的工厂记录，仅用于聚合展示。
+**A:** Die Summenzeile ist die einfache Summe der jeweiligen Kennzahlen aller sichtbaren Werke. `factory_id` ist die Null-UUID (`00000000-0000-0000-0000-000000000000`), `factory_code` ist leer, `factory_name` ist die Summenbezeichnung. Das ist kein eigener Werksdatensatz, sondern dient nur der aggregierten Anzeige.
 
-### Q7: 跨厂审核和普通审核有什么区别？
+### F7: Was unterscheidet werksübergreifende von normalen Audits?
 
-**A:** 集团审核页面 (`/group/audits`) 只展示关联了 2 个及以上工厂的审核计划（即跨厂审核）。单厂审核计划不会出现在集团审核列表中，但仍可在各模块的审核管理页面查看。跨厂审核的核心价值在于统一调度和发现项的跨厂跟踪。
+**A:** Die Seite Konzernaudits (`/group/audits`) zeigt nur Auditprogramme mit 2 oder mehr Werken (werksübergreifende Audits). Auditprogramme eines einzelnen Werks erscheinen dort nicht, sind aber weiterhin in der Auditverwaltung der Module sichtbar. Der Kernnutzen werksübergreifender Audits liegt in zentraler Planung und werksübergreifender Verfolgung von Feststellungen.
 
-### Q8: 一个用户可以属于多个工厂吗？
+### F8: Kann ein Benutzer mehreren Werken angehören?
 
-**A:** 可以。通过 `user_factories` 关联表，一个用户可以被分配到多个工厂。`users.factory_id` 字段表示用户的默认工厂（用于创建记录时自动填充），而 `user_factories` 决定了用户可以访问哪些工厂的数据。拥有 `group:ADMIN` 权限的用户不需要 `user_factories` 记录即可看到所有工厂。
+**A:** Ja. Über die Verknüpfungstabelle `user_factories` kann ein Benutzer mehreren Werken zugeordnet werden. `users.factory_id` ist das Standardwerk (zum automatischen Befüllen neuer Datensätze), `user_factories` bestimmt, auf welche Werke zugegriffen werden darf. Benutzer mit `group:ADMIN` sehen alle Werke auch ohne Einträge in `user_factories`.

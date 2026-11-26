@@ -9,14 +9,14 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 README = ROOT / "README.md"
-ZH_DEPLOYMENT = ROOT / "docs" / "deployment.md"
+DE_DEPLOYMENT = ROOT / "docs" / "deployment.md"
 EN_DEPLOYMENT = ROOT / "docs" / "en" / "deployment.md"
 USER_GUIDE = ROOT / "docs" / "user-guide.md"
 EN_ARCHITECTURE = ROOT / "docs" / "en" / "architecture.md"
 DECISIONS = ROOT / "docs" / "DECISIONS.md"
 TARGET_DOCS = (
     README,
-    ZH_DEPLOYMENT,
+    DE_DEPLOYMENT,
     EN_DEPLOYMENT,
     USER_GUIDE,
     EN_ARCHITECTURE,
@@ -47,7 +47,7 @@ def _normalized(text: str) -> str:
     ("path", "start_heading", "end_heading"),
     [
         (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
-        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (DE_DEPLOYMENT, "## 1. Produktivbetrieb auf Oracle ARM64", "## 2. Lokale Entwicklungsumgebung"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
 )
@@ -74,12 +74,12 @@ def test_production_shell_blocks_use_only_authoritative_wrapper_and_scripts(
     assert "./scripts/production-compose.sh exec -T db pg_restore --list" in commands
 
 
-@pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))
+@pytest.mark.parametrize("path", (README, DE_DEPLOYMENT, EN_DEPLOYMENT))
 def test_production_docs_explain_wrapper_and_data_safe_rollback(path):
     text = _text(path)
     assert "openqms" in text
     assert "production-compose.sh" in text
-    assert "ambient" in text.lower() or "环境覆盖" in text or "Umgebungsvariablen aus der Shell" in text
+    assert "ambient" in text.lower() or "Umgebungsvariablen aus der Shell" in text
     assert "down -v" not in text
     assert "qms.smartindustry.world" in text
     assert "Namecheap" in text
@@ -90,7 +90,7 @@ def test_production_docs_explain_wrapper_and_data_safe_rollback(path):
     assert "120" in text
 
 
-@pytest.mark.parametrize("path", (ZH_DEPLOYMENT, EN_DEPLOYMENT))
+@pytest.mark.parametrize("path", (DE_DEPLOYMENT, EN_DEPLOYMENT))
 def test_bilingual_runbooks_cover_launch_security_and_restore_boundaries(path):
     text = _text(path)
     required_literals = (
@@ -115,31 +115,31 @@ def test_bilingual_runbooks_cover_launch_security_and_restore_boundaries(path):
     )
     for literal in required_literals:
         assert literal in text
-    assert re.search(r"(?:public|公开).{0,30}/", text, flags=re.IGNORECASE)
-    assert re.search(r"(?:privileged|特权).{0,60}(?:rotate|轮换|password|密码)", text, flags=re.IGNORECASE)
-    assert re.search(r"(?:SSH).{0,100}(?:HTTPS).{0,100}(?:private|私网|Tailscale)", text, flags=re.IGNORECASE | re.DOTALL)
-    assert re.search(r"(?:restore|恢复).{0,200}(?:empty|空).{0,100}(?:database|数据库)", text, flags=re.IGNORECASE | re.DOTALL)
+    assert re.search(r"(?:public|öffentlich).{0,30}/", text, flags=re.IGNORECASE)
+    assert re.search(r"(?:privileged|privilegiert).{0,60}(?:rotate|password|Passw)", text, flags=re.IGNORECASE)
+    assert re.search(r"(?:SSH).{0,100}(?:HTTPS).{0,100}(?:private|privat|Tailscale)", text, flags=re.IGNORECASE | re.DOTALL)
+    assert re.search(r"(?:restore|Wiederherstellung).{0,200}(?:empty|leere).{0,100}(?:database|Datenbank)", text, flags=re.IGNORECASE | re.DOTALL)
 
 
 def test_docs_distinguish_compose_env_from_standalone_vite_public_values():
-    for path in (README, ZH_DEPLOYMENT, EN_DEPLOYMENT):
+    for path in (README, DE_DEPLOYMENT, EN_DEPLOYMENT):
         text = _text(path)
         assert ".env.production" in text
         assert "frontend/.env.local" in text
         assert "Viewer@2026" in text
         assert "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS" in text
         assert "Namecheap" in text
-        assert re.search(r"(?:browser-visible|浏览器可见|公开|im Browser sichtbar).{0,120}(?:Viewer|viewer)", text, flags=re.IGNORECASE | re.DOTALL)
+        assert re.search(r"(?:browser-visible|im Browser sichtbar).{0,120}(?:Viewer|viewer)", text, flags=re.IGNORECASE | re.DOTALL)
         assert "groupadmin" in text
-        assert "real data" in text or "真实数据" in text or "echten Daten" in text
-        assert "API key" in text or "API 密钥" in text or "API-Schlüssel" in text
+        assert "real data" in text or "echten Daten" in text
+        assert "API key" in text or "API-Schlüssel" in text
 
 
 @pytest.mark.parametrize(
     ("path", "replace_instruction", "append_instruction"),
     [
         (README, "vorhandenen leeren Wert ersetzen", "nur anhängen, wenn der Schlüssel"),
-        (ZH_DEPLOYMENT, "替换已有空值", "仅当旧文件缺少该键才追加"),
+        (DE_DEPLOYMENT, "vorhandenen leeren Wert ersetzen", "nur anhängen, wenn der Schlüssel"),
         (EN_DEPLOYMENT, "replace an existing blank value", "append only when the key is absent"),
     ],
 )
@@ -153,7 +153,7 @@ def test_optional_demo_env_migration_avoids_duplicate_keys(path, replace_instruc
     ("path", "start_heading", "end_heading"),
     [
         (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
-        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (DE_DEPLOYMENT, "## 1. Produktivbetrieb auf Oracle ARM64", "## 2. Lokale Entwicklungsumgebung"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
 )
@@ -168,7 +168,7 @@ def test_operator_host_release_uses_remote_wrapper_commands(
 
 
 def test_runbooks_provision_reachable_isolated_test_database_before_release():
-    for path in (README, ZH_DEPLOYMENT, EN_DEPLOYMENT):
+    for path in (README, DE_DEPLOYMENT, EN_DEPLOYMENT):
         text = _text(path)
         commands = _normalized(_bash_blocks(text))
         assert "-L 15432:127.0.0.1:5432" in commands
@@ -184,7 +184,7 @@ def test_runbooks_provision_reachable_isolated_test_database_before_release():
         assert commands.index('make --silent check-test-db') < commands.index("make deploy-release")
 
 
-@pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))
+@pytest.mark.parametrize("path", (README, DE_DEPLOYMENT, EN_DEPLOYMENT))
 def test_pre_public_proxy_probe_uses_tailscale_http_site_explicitly(path):
     commands = _normalized(_bash_blocks(_text(path)))
     assert "SITE_HOST=100.84.141.70" in commands
@@ -192,7 +192,7 @@ def test_pre_public_proxy_probe_uses_tailscale_http_site_explicitly(path):
     assert commands.index("SITE_SCHEME=http") < commands.index("./scripts/check-proxy-rate-limit.sh")
 
 
-@pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))
+@pytest.mark.parametrize("path", (README, DE_DEPLOYMENT, EN_DEPLOYMENT))
 def test_rollback_rebuild_does_not_stop_recovered_stack(path):
     text = _text(path)
     checkout_index = text.index("git checkout '<previous-release-tag>'")
@@ -205,7 +205,7 @@ def test_rollback_rebuild_does_not_stop_recovered_stack(path):
     assert "./scripts/production-compose.sh down" not in rollback_commands
 
 
-@pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))
+@pytest.mark.parametrize("path", (README, DE_DEPLOYMENT, EN_DEPLOYMENT))
 def test_operator_and_oracle_use_one_tracked_immutable_release(path):
     text = _text(path)
     commands = _normalized(_bash_blocks(text))
@@ -270,7 +270,7 @@ def test_operator_and_oracle_use_one_tracked_immutable_release(path):
     ("path", "start_heading", "end_heading"),
     [
         (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
-        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (DE_DEPLOYMENT, "## 1. Produktivbetrieb auf Oracle ARM64", "## 2. Lokale Entwicklungsumgebung"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
 )
@@ -316,7 +316,7 @@ def test_release_uses_exact_precreated_test_database_through_nested_make(
     ("path", "start_heading", "end_heading"),
     [
         (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
-        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (DE_DEPLOYMENT, "## 1. Produktivbetrieb auf Oracle ARM64", "## 2. Lokale Entwicklungsumgebung"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
 )
@@ -350,14 +350,14 @@ def test_all_local_release_gates_execute_from_archive_stage(
     assert commands.index(python_venv) < commands.index(frontend_install)
     assert commands.index(frontend_install) < commands.index(stage_cd)
     assert commands.index(stage_cd) < commands.index("make deploy-release")
-    assert "mutable working tree" in text or "可变 working tree" in text or "veränderlichen Arbeitsverzeichnis" in text
+    assert "mutable working tree" in text or "veränderlichen Arbeitsverzeichnis" in text
 
 
 @pytest.mark.parametrize(
     ("path", "start_heading", "end_heading"),
     [
         (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
-        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (DE_DEPLOYMENT, "## 1. Produktivbetrieb auf Oracle ARM64", "## 2. Lokale Entwicklungsumgebung"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
 )
@@ -407,7 +407,7 @@ def test_remote_images_are_bound_to_release_before_migration(
     ("path", "start_heading", "end_heading"),
     [
         (README, "## Produktivbetrieb auf Oracle ARM64", "## Stand der Module"),
-        (ZH_DEPLOYMENT, "## 1. Oracle ARM64 生产部署", "## 2. 本地开发环境"),
+        (DE_DEPLOYMENT, "## 1. Produktivbetrieb auf Oracle ARM64", "## 2. Lokale Entwicklungsumgebung"),
         (EN_DEPLOYMENT, "## 1. Oracle ARM64 Production Deployment", "## 2. Local Development Environment"),
     ],
 )
@@ -523,14 +523,14 @@ def test_readme_quick_start_is_explicitly_local_development_only():
     assert "Deployment-Leitfaden" in local_start
 
 
-@pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))
+@pytest.mark.parametrize("path", (README, DE_DEPLOYMENT, EN_DEPLOYMENT))
 def test_production_mode_documents_single_tenant_and_e2e_disabled(path):
     text = _text(path)
     assert "TENANT_MODE=single" in text
     assert "E2E_MODE=false" in text
 
 
-@pytest.mark.parametrize("path", (README, ZH_DEPLOYMENT, EN_DEPLOYMENT))
+@pytest.mark.parametrize("path", (README, DE_DEPLOYMENT, EN_DEPLOYMENT))
 def test_latest_backup_selection_is_nonrecursive_and_nonempty(path):
     commands = _normalized(_bash_blocks(_text(path)))
     selection = "latest=$(find /opt/openqms/backups/postgres -maxdepth 1 -type f -name '*.dump' | sort | tail -1)"
@@ -554,7 +554,7 @@ def test_user_and_architecture_docs_describe_safe_automatic_refresh():
     user_guide = _text(USER_GUIDE)
     architecture = _text(EN_ARCHITECTURE)
     combined = user_guide + architecture
-    assert "暂不支持自动刷新" not in user_guide
+    assert "keine automatische Verlängerung" not in user_guide
     assert "does not auto-refresh tokens" not in architecture
     assert "users must re-login after 120 minutes" not in architecture
     assert "120" in combined
@@ -583,9 +583,9 @@ def test_adr_0014_supersedes_legacy_refresh_decision_with_security_boundaries():
         "legacy",
     ):
         assert literal.lower() in adr_0014.lower()
-    assert re.search(r"(?:row lock|行锁).{0,120}(?:replay|重放)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
-    assert re.search(r"(?:rolling|滚动).{0,80}(?:inactivity|不活跃)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
-    assert re.search(r"(?:password reset|密码重置).{0,160}(?:revoke|撤销).{0,160}(?:access|访问)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
+    assert re.search(r"(?:row lock|Zeilensperre).{0,120}(?:replay)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
+    assert re.search(r"(?:rolling|rollierend).{0,80}(?:inactivity|Inaktivität)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
+    assert re.search(r"(?:password reset|Passwort-Reset).{0,160}(?:revoke|widerruft).{0,160}(?:access)", adr_0014, flags=re.IGNORECASE | re.DOTALL)
     assert decisions.index("## ADR-0014") > decisions.index("## ADR-0013")
 
 
@@ -596,14 +596,14 @@ def test_adr_0015_records_deliberate_public_writable_demo_exception():
     assert decisions.index("## ADR-0015") > decisions.index("## ADR-0014")
     for literal in ("Namecheap", "admin", "groupadmin", "VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS", "Viewer"):
         assert literal in adr
-    assert "真实数据" in adr
-    assert "API 密钥" in adr
-    assert "自动重置" in adr
+    assert "echten Daten" in adr
+    assert "API-Schlüssel" in adr
+    assert "automatisches Zurücksetzen" in adr
 
 
 def test_adr_0016_keeps_admin_roles_private_and_public_demo_nonadministrative():
     decisions = _text(DECISIONS)
-    adr = _section(DECISIONS, "## ADR-0016", "## 何时写新 ADR")
+    adr = _section(DECISIONS, "## ADR-0016", "## Wann eine neue ADR schreiben")
     assert decisions.index("## ADR-0016") > decisions.index("## ADR-0015")
     for literal in (
         "Viewer",
@@ -616,6 +616,6 @@ def test_adr_0016_keeps_admin_roles_private_and_public_demo_nonadministrative():
         "403",
     ):
         assert literal in adr
-    assert "保持私密" in adr
-    assert "真实数据" in adr
-    assert "API 密钥" in adr
+    assert "bleiben privat" in adr
+    assert "echten Daten" in adr
+    assert "API-Schlüssel" in adr

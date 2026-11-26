@@ -1,53 +1,53 @@
-# ERP / MES / PLM 集成模块 — 用户手册
+# Integrationsmodule ERP / MES / PLM — Benutzerhandbuch
 
-> 最后更新: 2026-06-13 | 适用版本: OpenQMS v1.0
+> Zuletzt aktualisiert: 2026-06-13 | Gilt für: OpenQMS v1.0
 
 ---
 
-## 1. 功能概述
+## 1. Funktionsüberblick
 
-OpenQMS 提供 ERP、MES、PLM 三大外部系统集成模块，以 **连接器 (Connector)** 架构对接企业现有系统，将质量数据与供应链、制造执行、产品生命周期打通，实现全链路质量追溯。
+OpenQMS bietet Integrationsmodule für die drei externen Systeme ERP, MES und PLM. Über eine **Konnektor-Architektur (Connector)** werden bestehende Unternehmenssysteme angebunden und Qualitätsdaten mit Lieferkette, Fertigungssteuerung und Produktlebenszyklus verbunden – für durchgängige Rückverfolgbarkeit.
 
-三大模块均为 **集成看板 (Integration Dashboard)** 形态：通过配置连接器从外部系统拉取数据，在 OpenQMS 内展示、关联并驱动质量业务。
+Alle drei Module sind als **Integrations-Dashboard (Integration Dashboard)** aufgebaut: Konfigurierte Konnektoren holen Daten aus externen Systemen, die in OpenQMS angezeigt, verknüpft und für Qualitätsprozesse genutzt werden.
 
-| 模块 | 核心能力 | 典型场景 |
+| Modul | Kernfunktionen | Typischer Einsatz |
 |------|---------|---------|
-| ERP | 供应商/客户主数据同步、采购与销售订单追踪、库存查询、质量成本分析、批次正反向追溯 | 追溯某批次原材料从哪个供应商采购、发往哪个客户；核算质量成本 |
-| MES | 生产订单进度监控、设备 OEE 查看、不良品/报废追踪、SPC 测量数据自动回传 | 实时查看产线状态；MES 推送测量数据至 OpenQMS 触发 SPC 报警 |
-| PLM | 零件/BOM 同步、ECN 变更管理、FMEA 关联与 BOM 导入、特殊特性确认 | 零件变更后自动分析受影响的 FMEA 节点；将 BOM 结构导入 FMEA |
+| ERP | Synchronisation von Lieferanten-/Kundenstammdaten, Verfolgung von Einkaufs- und Verkaufsaufträgen, Bestandsabfrage, Qualitätskostenanalyse, Chargenrückverfolgung vorwärts und rückwärts | Rückverfolgen, bei welchem Lieferanten eine Rohmaterialcharge gekauft und an welchen Kunden sie geliefert wurde; Qualitätskosten ermitteln |
+| MES | Überwachung des Fertigungsauftragsfortschritts, Anlagen-OEE, Verfolgung von Fehlteilen/Ausschuss, automatische Rückmeldung von SPC-Messdaten | Linienstatus in Echtzeit; MES sendet Messdaten an OpenQMS und löst SPC-Alarme aus |
+| PLM | Synchronisation von Teilen/Stücklisten, ECN-Änderungsmanagement, FMEA-Verknüpfung und Stücklistenimport, Bestätigung besonderer Merkmale | Nach Teileänderungen automatisch betroffene FMEA-Knoten analysieren; Stücklistenstruktur in die FMEA importieren |
 
-**数据流向：**
+**Datenflüsse:**
 
-- **拉取 (Pull)：** 连接器定时从外部系统同步数据，写入 OpenQMS 对应数据表
-- **推送 (Push)：** 外部系统通过 Ingest API 主动推送数据到 OpenQMS
-- **回写 (Outbox Push)：** MES 模块支持将 SPC 报警事件推送到 MES 系统（需连接器启用 `push_enabled`）
+- **Abholen (Pull):** Konnektoren synchronisieren zeitgesteuert Daten aus externen Systemen in die zugehörigen OpenQMS-Tabellen
+- **Senden (Push):** Externe Systeme senden Daten aktiv über die Ingest-API an OpenQMS
+- **Rückschreiben (Outbox Push):** Das MES-Modul kann SPC-Alarmereignisse an das MES senden (Konnektor mit `push_enabled`)
 
-**前端路由：**
+**Frontend-Routen:**
 
-| 模块 | 页面 | 路由 | 路由守卫 |
+| Modul | Seite | Route | Routenschutz |
 |------|------|------|---------|
-| ERP | 仪表盘 | `/erp` | `requiredModule="erp"` |
-| | 连接管理 | `/erp/connections` | `requiredModule="erp"` |
-| | 主数据 | `/erp/master-data` | `requiredModule="erp"` |
-| | 供应链 | `/erp/supply-chain` | `requiredModule="erp"` |
-| | 商务/成本 | `/erp/commercial` | `requiredModule="erp"` |
-| | 追溯 | `/erp/traceability` | `requiredModule="erp"` |
-| MES | 仪表盘 | `/mes/dashboard` | 仅认证（无 `requiredModule`） |
-| | 连接管理 | `/mes/connections` | 仅认证 |
-| | 生产订单 | `/mes/orders` | 仅认证 |
-| | 报废追踪 | `/mes/scrap` | 仅认证 |
-| PLM | 仪表盘 | `/plm/dashboard` | `requiredModule="plm"` |
-| | 连接管理 | `/plm/connections` | `requiredModule="plm"` |
-| | 零件/BOM | `/plm/parts` | `requiredModule="plm"` |
-| | 变更单 | `/plm/change-orders` | `requiredModule="plm"` |
+| ERP | Dashboard | `/erp` | `requiredModule="erp"` |
+| | Verbindungsverwaltung | `/erp/connections` | `requiredModule="erp"` |
+| | Stammdaten | `/erp/master-data` | `requiredModule="erp"` |
+| | Lieferkette | `/erp/supply-chain` | `requiredModule="erp"` |
+| | Geschäft/Kosten | `/erp/commercial` | `requiredModule="erp"` |
+| | Rückverfolgung | `/erp/traceability` | `requiredModule="erp"` |
+| MES | Dashboard | `/mes/dashboard` | Nur Anmeldung (kein `requiredModule`) |
+| | Verbindungsverwaltung | `/mes/connections` | Nur Anmeldung |
+| | Fertigungsaufträge | `/mes/orders` | Nur Anmeldung |
+| | Ausschussverfolgung | `/mes/scrap` | Nur Anmeldung |
+| PLM | Dashboard | `/plm/dashboard` | `requiredModule="plm"` |
+| | Verbindungsverwaltung | `/plm/connections` | `requiredModule="plm"` |
+| | Teile/Stücklisten | `/plm/parts` | `requiredModule="plm"` |
+| | Änderungsaufträge | `/plm/change-orders` | `requiredModule="plm"` |
 
-> **注意：** MES 前端路由未设置 `requiredModule` 守卫，仅检查登录状态；但后端 API 仍通过 `get_user_permission(user, Module.MES, db)` 校验权限。
+> **Hinweis:** Die MES-Frontend-Routen haben keinen Schutz über `requiredModule` und prüfen nur die Anmeldung; die Backend-API prüft die Rechte jedoch weiterhin über `get_user_permission(user, Module.MES, db)`.
 
 ---
 
-## 2. 适用角色与权限
+## 2. Rollen und Berechtigungen
 
-系统采用 6 级权限模型：NONE(0) / VIEW(1) / CREATE(2) / EDIT(3) / APPROVE(4) / ADMIN(5)。
+Das System nutzt ein Berechtigungsmodell mit 6 Stufen: NONE(0) / VIEW(1) / CREATE(2) / EDIT(3) / APPROVE(4) / ADMIN(5).
 
 | ModuleKey | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
 |-----------|:-----:|:-------:|:--------:|:-----------:|:-----------:|:-----------:|:------:|
@@ -55,418 +55,418 @@ OpenQMS 提供 ERP、MES、PLM 三大外部系统集成模块，以 **连接器 
 | `mes` | 5 | 4 | 2 | 1 | 1 | 1 | 1 |
 | `plm` | 5 | 4 | 2 | 1 | 1 | 1 | 1 |
 
-**权限解读：**
+**Bedeutung der Rechte:**
 
-- **admin (5 — ADMIN)：** 完全控制，包括删除连接、配置加密密钥等
-- **manager (4 — APPROVE)：** 可创建/编辑连接、触发同步、查看全部数据
-- **field_qe (2 — CREATE)：** ERP/MES 仅查看数据，PLM 可创建连接和关联 FMEA/确认特殊特性
-- **planning_qe / supplier_qe / customer_qe (1 — VIEW)：** 仅可查看数据看板和报表
-- **viewer (1 — VIEW)：** 仅可查看数据看板和报表
+- **admin (5 — ADMIN):** Vollzugriff, einschließlich Löschen von Verbindungen und Konfiguration von Verschlüsselungsschlüsseln
+- **manager (4 — APPROVE):** Verbindungen anlegen/bearbeiten, Synchronisation auslösen, alle Daten ansehen
+- **field_qe (2 — CREATE):** Bei ERP/MES nur Daten ansehen, bei PLM Verbindungen anlegen, FMEA verknüpfen und besondere Merkmale bestätigen
+- **planning_qe / supplier_qe / customer_qe (1 — VIEW):** nur Dashboards und Berichte ansehen
+- **viewer (1 — VIEW):** nur Dashboards und Berichte ansehen
 
-### 操作与最低权限对照
+### Operationen und Mindestberechtigung
 
-#### ERP 操作权限
+#### ERP-Operationen
 
-| 操作 | 最低 PermissionLevel | 说明 |
+| Operation | Mindest-PermissionLevel | Beschreibung |
 |------|---------------------|------|
-| 查看仪表盘/数据 | VIEW (1) | 所有角色可查看 |
-| 查看供应商/客户（脱敏） | VIEW (1) | VIEW 级别显示掩码数据 |
-| 查看供应商/客户（完整） | APPROVE (4) | APPROVE 及以上显示完整信息 |
-| 关联/取消关联供应商 | EDIT (3) | field_qe 无此权限，仅 manager/admin |
-| 关联/取消关联客户 | EDIT (3) | 同上 |
-| 创建连接 | APPROVE (4) | 仅 manager、admin |
-| 修改连接配置 | APPROVE (4) | 仅 manager、admin |
-| 测试连接 | APPROVE (4) | 仅 manager、admin |
-| 触发手动同步 | APPROVE (4) | 仅 manager、admin |
-| 删除连接 | ADMIN (5) | 仅 admin |
-| Ingest API 推送 | API Key 认证 | 不走角色权限，使用 X-API-Key 头 |
+| Dashboard/Daten ansehen | VIEW (1) | Für alle Rollen sichtbar |
+| Lieferanten/Kunden ansehen (geschwärzt) | VIEW (1) | Mit VIEW maskierte Daten |
+| Lieferanten/Kunden ansehen (vollständig) | APPROVE (4) | Ab APPROVE vollständige Informationen |
+| Lieferanten verknüpfen/entknüpfen | EDIT (3) | field_qe hat dieses Recht nicht, nur manager/admin |
+| Kunden verknüpfen/entknüpfen | EDIT (3) | Wie oben |
+| Verbindung anlegen | APPROVE (4) | Nur manager, admin |
+| Verbindungskonfiguration ändern | APPROVE (4) | Nur manager, admin |
+| Verbindung testen | APPROVE (4) | Nur manager, admin |
+| Manuelle Synchronisation auslösen | APPROVE (4) | Nur manager, admin |
+| Verbindung löschen | ADMIN (5) | Nur admin |
+| Senden über die Ingest-API | API-Key-Authentifizierung | Keine Rollenrechte, Header X-API-Key |
 
-#### MES 操作权限
+#### MES-Operationen
 
-| 操作 | 最低 PermissionLevel | 说明 |
+| Operation | Mindest-PermissionLevel | Beschreibung |
 |------|---------------------|------|
-| 查看仪表盘/生产订单/设备/报废 | VIEW (1) | 所有角色可查看 |
-| 创建连接 | APPROVE (4) | 仅 manager、admin |
-| 修改/删除连接 | APPROVE (4) | 仅 manager、admin |
-| 测试连接 | APPROVE (4) | 仅 manager、admin |
-| 触发手动同步 | APPROVE (4) | 仅 manager、admin |
-| Ingest API 推送 | API Key 认证 | 不走角色权限，使用 X-API-Key + X-Connection-Id 头 |
+| Dashboard/Fertigungsaufträge/Anlagen/Ausschuss ansehen | VIEW (1) | Für alle Rollen sichtbar |
+| Verbindung anlegen | APPROVE (4) | Nur manager, admin |
+| Verbindung ändern/löschen | APPROVE (4) | Nur manager, admin |
+| Verbindung testen | APPROVE (4) | Nur manager, admin |
+| Manuelle Synchronisation auslösen | APPROVE (4) | Nur manager, admin |
+| Senden über die Ingest-API | API-Key-Authentifizierung | Keine Rollenrechte, Header X-API-Key + X-Connection-Id |
 
-#### PLM 操作权限
+#### PLM-Operationen
 
-| 操作 | 最低 PermissionLevel | 说明 |
+| Operation | Mindest-PermissionLevel | Beschreibung |
 |------|---------------------|------|
-| 查看仪表盘/零件/BOM/变更单 | VIEW (1) | 所有角色可查看 |
-| 创建连接 | CREATE (2) | field_qe 及以上 |
-| 修改连接配置 | EDIT (3) | field_qe 无此权限，仅 manager/admin |
-| 测试连接 | EDIT (3) | 仅 manager/admin |
-| 触发手动同步 | EDIT (3) | 仅 manager/admin |
-| 零件关联 FMEA | EDIT (3) | 仅 manager/admin |
-| 确认特殊特性 | EDIT (3) + SC CREATE (2) | 需同时拥有 PLM EDIT 和 SPECIAL_CHARACTERISTIC CREATE |
-| 触发变更影响分析 | EDIT (3) | 仅 manager/admin |
-| 导入 BOM 到 FMEA | EDIT (3) | 仅 manager/admin |
-| 删除连接 | ADMIN (5) | 仅 admin |
+| Dashboard/Teile/Stücklisten/Änderungsaufträge ansehen | VIEW (1) | Für alle Rollen sichtbar |
+| Verbindung anlegen | CREATE (2) | Ab field_qe |
+| Verbindungskonfiguration ändern | EDIT (3) | field_qe hat dieses Recht nicht, nur manager/admin |
+| Verbindung testen | EDIT (3) | Nur manager/admin |
+| Manuelle Synchronisation auslösen | EDIT (3) | Nur manager/admin |
+| Teil mit FMEA verknüpfen | EDIT (3) | Nur manager/admin |
+| Besondere Merkmale bestätigen | EDIT (3) + SC CREATE (2) | Erfordert PLM EDIT und SPECIAL_CHARACTERISTIC CREATE |
+| Änderungsauswirkungsanalyse auslösen | EDIT (3) | Nur manager/admin |
+| Stückliste in FMEA importieren | EDIT (3) | Nur manager/admin |
+| Verbindung löschen | ADMIN (5) | Nur admin |
 
-> **PLM 特殊权限：** `confirm_part_sc` 接口需同时校验 PLM 模块 EDIT (3) 权限和 SPECIAL_CHARACTERISTIC 模块 CREATE (2) 权限。
+> **Besonderes PLM-Recht:** Die Schnittstelle `confirm_part_sc` prüft sowohl EDIT (3) im PLM-Modul als auch CREATE (2) im Modul SPECIAL_CHARACTERISTIC.
 
 ---
 
-## 3. ERP 集成
+## 3. ERP-Integration
 
-### 3.1 仪表盘
+### 3.1 Dashboard
 
-ERP 仪表盘（`/erp`）提供以下概览信息：
+Das ERP-Dashboard (`/erp`) bietet folgende Übersicht:
 
-| 区域 | 内容 | 数据源 |
+| Bereich | Inhalt | Datenquelle |
 |------|------|--------|
-| 同步健康状态 | 各数据类型的最近同步时间、状态、失败次数 | `erp_sync_jobs` |
-| 质量成本摘要 | 按类别的质量成本汇总 | `erp_cost_records` |
-| 待处理事项 | 需要关注的异常项（如库存预警、发运风险） | 系统聚合 |
-| 库存预警 | 低库存或过期预警 | `erp_inventory_balances` |
-| 发运风险 | 延期或异常发运 | `erp_shipments` |
-| KPI 指标 | 关键绩效指标 | 系统计算 |
+| Synchronisationszustand | Letzte Synchronisation, Status und Fehlschläge je Datentyp | `erp_sync_jobs` |
+| Zusammenfassung Qualitätskosten | Qualitätskosten nach Kategorie | `erp_cost_records` |
+| Offene Punkte | Auffälligkeiten mit Handlungsbedarf (z. B. Bestandswarnung, Versandrisiko) | Systemaggregation |
+| Bestandswarnungen | Niedriger Bestand oder Ablaufwarnung | `erp_inventory_balances` |
+| Versandrisiken | Verspätete oder auffällige Sendungen | `erp_shipments` |
+| KPI-Kennzahlen | Zentrale Leistungskennzahlen | Systemberechnung |
 
-### 3.2 连接管理
+### 3.2 Verbindungsverwaltung
 
-**路由：** `/erp/connections`
+**Route:** `/erp/connections`
 
-#### 3.2.1 连接器类型
+#### 3.2.1 Konnektortypen
 
-| 类型 | 说明 |
+| Typ | Beschreibung |
 |------|------|
-| `mock` | 内置模拟连接器，生成 DC-DC-100 产品线的示例数据，用于演示和测试 |
-| `rest` | 通用 REST API 连接器，支持分页、认证、重试、字段映射等完整配置 |
+| `mock` | Eingebauter Simulationskonnektor mit Beispieldaten der Produktlinie DC-DC-100 für Demo und Test |
+| `rest` | Allgemeiner REST-API-Konnektor mit vollständiger Konfiguration für Paginierung, Authentifizierung, Retry und Feldzuordnung |
 
-#### 3.2.2 REST 连接器配置
+#### 3.2.2 Konfiguration des REST-Konnektors
 
-创建 REST 连接器时需配置以下参数：
+Beim Anlegen eines REST-Konnektors sind folgende Parameter zu konfigurieren:
 
-**基础配置：**
+**Grundkonfiguration:**
 
-| 参数 | 说明 | 示例 |
+| Parameter | Beschreibung | Beispiel |
 |------|------|------|
-| `name` | 连接名称 | "SAP S/4HANA 生产" |
-| `connector_type` | 固定为 `rest` | — |
-| `product_line_code` | 产品线编码 | "DC-DC-100" |
-| `config.base_url` | ERP 系统 API 基地址 | `https://erp.example.com/api/v1` |
-| `config.timeout` | 请求超时（秒） | 30 |
-| `config.retry` | 重试配置 | `{"max_retries": 3, "backoff_factor": 1.0}` |
+| `name` | Verbindungsname | „SAP S/4HANA Produktion“ |
+| `connector_type` | Fest `rest` | — |
+| `product_line_code` | Produktliniencode | "DC-DC-100" |
+| `config.base_url` | Basis-URL der ERP-API | `https://erp.example.com/api/v1` |
+| `config.timeout` | Anfrage-Timeout (Sekunden) | 30 |
+| `config.retry` | Retry-Konfiguration | `{"max_retries": 3, "backoff_factor": 1.0}` |
 
-**认证配置 (`config.auth_type`)：**
+**Authentifizierung (`config.auth_type`):**
 
-| 类型 | 说明 | 额外参数 |
+| Typ | Beschreibung | Zusätzliche Parameter |
 |------|------|---------|
-| `none` | 无认证 | — |
+| `none` | Keine Authentifizierung | — |
 | `basic` | HTTP Basic Auth | `auth_config.username`, `auth_config.password` |
 | `bearer` | Bearer Token | `auth_config.token` |
-| `api_key` | API Key 头 | `auth_config.header_name`, `auth_config.api_key` |
+| `api_key` | API-Key-Header | `auth_config.header_name`, `auth_config.api_key` |
 
-> 认证信息存储时使用 Fernet 对称加密（`ERP_ENCRYPTION_KEY` 环境变量），API 响应中自动脱敏（移除 `auth_config`、`*_encrypted`、`*_hash` 字段）。
+> Authentifizierungsdaten werden mit Fernet symmetrisch verschlüsselt gespeichert (Umgebungsvariable `ERP_ENCRYPTION_KEY`) und in API-Antworten automatisch geschwärzt (Entfernen von `auth_config`, `*_encrypted`, `*_hash`).
 
-**端点配置 (`config.endpoints`)：**
+**Endpunkte (`config.endpoints`):**
 
-需配置 9 个数据类型的拉取端点：
+Für 9 Datentypen sind Abrufendpunkte zu konfigurieren:
 
-| 端点键 | 对应数据 | 说明 |
+| Endpunktschlüssel | Daten | Beschreibung |
 |--------|---------|------|
-| `suppliers` | 供应商 | 供应商主数据 |
-| `customers` | 客户 | 客户主数据 |
-| `materials` | 物料 | 物料主数据 |
-| `locations` | 库位 | 仓库/库位信息 |
-| `purchase_orders` | 采购订单 | PO 明细 |
-| `sales_orders` | 销售订单 | SO 明细 |
-| `inventory_balances` | 库存余额 | 实时库存快照 |
-| `shipments` | 发运记录 | 出货记录 |
-| `cost_records` | 成本记录 | 质量成本数据 |
+| `suppliers` | Lieferanten | Lieferantenstammdaten |
+| `customers` | Kunden | Kundenstammdaten |
+| `materials` | Material | Materialstammdaten |
+| `locations` | Lagerorte | Lager-/Lagerortinformationen |
+| `purchase_orders` | Einkaufsaufträge | PO-Positionen |
+| `sales_orders` | Verkaufsaufträge | SO-Positionen |
+| `inventory_balances` | Bestandssalden | Bestandsschnappschuss in Echtzeit |
+| `shipments` | Sendungen | Versanddatensätze |
+| `cost_records` | Kostendatensätze | Qualitätskostendaten |
 
-每个端点需配置 `url_path`、`method`（默认 GET）、分页方式（`offset` / `cursor` / `none`）、字段映射等。
+Je Endpunkt werden `url_path`, `method` (Standard GET), Paginierungsart (`offset` / `cursor` / `none`), Feldzuordnung usw. konfiguriert.
 
-**字段映射 (`config.field_mapping`)：**
+**Feldzuordnung (`config.field_mapping`):**
 
-用于将外部系统字段名映射到 OpenQMS 内部字段名，格式示例：
+Ordnet Feldnamen des externen Systems internen OpenQMS-Feldnamen zu, Beispiel:
 
 ```json
 {
-  "suppliers": {"外部字段_供应商编码": "supplier_code", "外部字段_名称": "name"},
+  "suppliers": {"ext_feld_lieferantencode": "supplier_code", "ext_feld_name": "name"},
   "materials": {"MaterialNo": "material_code"}
 }
 ```
 
-#### 3.2.3 连接生命周期
+#### 3.2.3 Lebenszyklus einer Verbindung
 
-| 操作 | 权限 | 说明 |
+| Operation | Berechtigung | Beschreibung |
 |------|------|------|
-| 创建连接 | APPROVE (4) | 填写名称、类型、配置 |
-| 测试连接 | APPROVE (4) | 向外部系统发起一次测试请求，验证连通性和认证 |
-| 修改配置 | APPROVE (4) | 更新连接参数 |
-| 触发手动同步 | APPROVE (4) | 立即拉取所有数据类型 |
-| 删除连接 | ADMIN (5) | 软删除（标记 `is_active = false`） |
+| Verbindung anlegen | APPROVE (4) | Name, Typ und Konfiguration eingeben |
+| Verbindung testen | APPROVE (4) | Eine Testanfrage an das externe System senden und Erreichbarkeit sowie Authentifizierung prüfen |
+| Konfiguration ändern | APPROVE (4) | Verbindungsparameter aktualisieren |
+| Manuelle Synchronisation auslösen | APPROVE (4) | Alle Datentypen sofort abholen |
+| Verbindung löschen | ADMIN (5) | Weiches Löschen (Kennzeichen `is_active = false`) |
 
-**同步机制：**
+**Synchronisationsmechanismus:**
 
-ERP 同步采用 **4 阶段 DAG 调度**：
+Die ERP-Synchronisation nutzt eine **DAG-Steuerung in 4 Phasen**:
 
-- **Phase 1：** suppliers、customers、materials、locations（主数据）
-- **Phase 2：** purchase_orders、sales_orders（单据，依赖 Phase 1）
-- **Phase 3：** inventory_balances、shipments（实时数据）
-- **Phase 4：** cost_records（汇总数据）
+- **Phase 1:** suppliers, customers, materials, locations (Stammdaten)
+- **Phase 2:** purchase_orders, sales_orders (Belege, abhängig von Phase 1)
+- **Phase 3:** inventory_balances, shipments (Echtzeitdaten)
+- **Phase 4:** cost_records (aggregierte Daten)
 
-每个数据类型对应一条 `ERPSyncJob`，使用 `SELECT ... FOR UPDATE SKIP LOCKED` 避免并发冲突。连续失败 3 次后自动停用连接。
+Je Datentyp gibt es einen `ERPSyncJob`; `SELECT ... FOR UPDATE SKIP LOCKED` verhindert Konflikte. Nach 3 aufeinanderfolgenden Fehlschlägen wird die Verbindung automatisch deaktiviert.
 
-### 3.3 主数据
+### 3.3 Stammdaten
 
-**路由：** `/erp/master-data`
+**Route:** `/erp/master-data`
 
-展示从 ERP 同步的四大主数据：
+Zeigt die vier aus dem ERP synchronisierten Stammdatenarten:
 
-| 数据 | 字段要点 | 说明 |
+| Daten | Wichtige Felder | Beschreibung |
 |------|---------|------|
-| **供应商 (Suppliers)** | supplier_code, name, status, payment_terms, currency, tax_id, bank_info, link_status | VIEW 权限显示脱敏数据（银行信息掩码），APPROVE 权限显示完整数据 |
-| **客户 (Customers)** | customer_code, name, status, region, customer_level, tax_id, link_status | 同供应商，按权限脱敏 |
-| **物料 (Materials)** | material_code, name, specification, unit, material_type, is_purchased, is_manufactured, default_supplier_code, status | 物料类型区分采购件和自制件 |
-| **库位 (Locations)** | location_code, warehouse_code, zone_code, location_type, is_enabled | 仓库-区域-库位三级结构 |
+| **Lieferanten (Suppliers)** | supplier_code, name, status, payment_terms, currency, tax_id, bank_info, link_status | Mit VIEW geschwärzte Daten (Bankdaten maskiert), mit APPROVE vollständige Daten |
+| **Kunden (Customers)** | customer_code, name, status, region, customer_level, tax_id, link_status | Wie Lieferanten, nach Berechtigung geschwärzt |
+| **Material (Materials)** | material_code, name, specification, unit, material_type, is_purchased, is_manufactured, default_supplier_code, status | Materialart unterscheidet Kauf- und Eigenfertigungsteile |
+| **Lagerorte (Locations)** | location_code, warehouse_code, zone_code, location_type, is_enabled | Dreistufige Struktur Lager–Bereich–Lagerplatz |
 
-**供应商/客户关联：**
+**Verknüpfung von Lieferanten/Kunden:**
 
-每条供应商/客户记录有 `link_status` 字段，取值为：
+Jeder Lieferanten-/Kundendatensatz hat ein Feld `link_status` mit den Werten:
 
-| 状态 | 说明 |
+| Status | Beschreibung |
 |------|------|
-| `pending` | 已同步但未关联 OpenQMS 内部供应商/客户 |
-| `linked` | 已关联 OpenQMS 供应商/客户记录 |
-| `unlinked` | 已取消关联 |
+| `pending` | Synchronisiert, aber nicht mit einem internen OpenQMS-Lieferanten/-Kunden verknüpft |
+| `linked` | Mit einem OpenQMS-Lieferanten/-Kunden verknüpft |
+| `unlinked` | Verknüpfung aufgehoben |
 
-关联操作通过 `/api/erp/suppliers/{id}/link` 和 `/api/erp/customers/{id}/link` 接口完成（需 EDIT 权限），将外部 ERP 供应商与 OpenQMS `suppliers` 表建立双向引用。
+Verknüpfungen erfolgen über `/api/erp/suppliers/{id}/link` und `/api/erp/customers/{id}/link` (erfordert EDIT) und stellen eine bidirektionale Referenz zwischen externem ERP-Lieferanten und der OpenQMS-Tabelle `suppliers` her.
 
-### 3.4 供应链
+### 3.4 Lieferkette
 
-**路由：** `/erp/supply-chain`
+**Route:** `/erp/supply-chain`
 
-展示采购、销售、库存、发运四个维度的供应链数据：
+Zeigt Lieferkettendaten in den vier Dimensionen Einkauf, Verkauf, Bestand und Versand:
 
-| 数据 | 关键字段 | 说明 |
+| Daten | Wichtige Felder | Beschreibung |
 |------|---------|------|
-| **采购订单 (Purchase Orders)** | po_number, line_number, supplier_code, material_code, quantity, unit_price, delivery_date, received_quantity, status, lot_no | 含批次号，可追溯到供应商 |
-| **销售订单 (Sales Orders)** | so_number, line_number, customer_code, material_code, quantity, unit_price, delivery_date, status | 按客户维度查看 |
-| **库存余额 (Inventory Balances)** | material_code, location_code, lot_no, supplier_lot_no, quantity, unit, inventory_status, manufacture_date, expiry_date | 含批次和供应商批次，支持效期管理 |
-| **发运记录 (Shipments)** | shipment_number, so_number, customer_code, material_code, lot_no, quantity, shipment_date, link_status | 可关联 OpenQMS 发运检验记录 |
+| **Einkaufsaufträge (Purchase Orders)** | po_number, line_number, supplier_code, material_code, quantity, unit_price, delivery_date, received_quantity, status, lot_no | Mit Chargennummer, rückverfolgbar bis zum Lieferanten |
+| **Verkaufsaufträge (Sales Orders)** | so_number, line_number, customer_code, material_code, quantity, unit_price, delivery_date, status | Nach Kunde einsehbar |
+| **Bestandssalden (Inventory Balances)** | material_code, location_code, lot_no, supplier_lot_no, quantity, unit, inventory_status, manufacture_date, expiry_date | Mit Charge und Lieferantencharge, Unterstützung von Haltbarkeitsdaten |
+| **Sendungen (Shipments)** | shipment_number, so_number, customer_code, material_code, lot_no, quantity, shipment_date, link_status | Verknüpfbar mit OpenQMS-Versandprüfdatensätzen |
 
-**发运关联：** 同步时系统自动按 `customer_id + lot_no + shipment_date` 匹配 OpenQMS `ShipmentRecord`，将 `openqms_shipment_id` 写入 ERP 发运记录。
+**Versandverknüpfung:** Bei der Synchronisation ordnet das System über `customer_id + lot_no + shipment_date` automatisch ein OpenQMS-`ShipmentRecord` zu und schreibt `openqms_shipment_id` in den ERP-Versanddatensatz.
 
-### 3.5 商务与成本
+### 3.5 Geschäft und Kosten
 
-**路由：** `/erp/commercial`
+**Route:** `/erp/commercial`
 
-展示质量成本数据：
+Zeigt Qualitätskostendaten:
 
-| 数据 | 关键字段 | 说明 |
+| Daten | Wichtige Felder | Beschreibung |
 |------|---------|------|
-| **成本记录 (Cost Records)** | record_type, cost_category, cost_type, amount, currency, period_month, source_document_no, material_code, supplier_code, cost_center, cost_date, description | 多维度成本归集 |
+| **Kostendatensätze (Cost Records)** | record_type, cost_category, cost_type, amount, currency, period_month, source_document_no, material_code, supplier_code, cost_center, cost_date, description | Mehrdimensionale Kostenzuordnung |
 
-成本分类维度：
+Dimensionen der Kostenklassifizierung:
 
-- **record_type：** 记录类型（如预防成本、鉴定成本、内部故障成本、外部故障成本）
-- **cost_category：** 成本类别
-- **cost_type：** 具体成本项目
-- **cost_center：** 成本中心
+- **record_type:** Datensatzart (z. B. Verhütungs-, Prüf-, interne Fehler-, externe Fehlerkosten)
+- **cost_category:** Kostenkategorie
+- **cost_type:** konkrete Kostenposition
+- **cost_center:** Kostenstelle
 
-### 3.6 追溯
+### 3.6 Rückverfolgung
 
-**路由：** `/erp/traceability`
+**Route:** `/erp/traceability`
 
-提供基于批次的 **双向追溯 (Traceability)** 功能：
+Bietet chargenbasierte **bidirektionale Rückverfolgung (Traceability)**:
 
-- **正向追溯：** 从原材料批次出发 → 采购订单 → 供应商 → 成品发运 → 客户
-- **反向追溯：** 从客户投诉出发 → 发运记录 → 生产批次 → 原材料批次 → 供应商
+- **Vorwärts:** von der Rohmaterialcharge → Einkaufsauftrag → Lieferant → Versand des Fertigprodukts → Kunde
+- **Rückwärts:** von der Kundenreklamation → Versanddatensatz → Fertigungscharge → Rohmaterialcharge → Lieferant
 
-**追溯结果：**
+**Ergebnis der Rückverfolgung:**
 
 ```json
 {
-  "nodes": [/* 追溯节点列表 */],
-  "edges": [/* 节间关系 */],
-  "gaps": [/* 数据缺口提示 */]
+  "nodes": [/* Liste der Knoten */],
+  "edges": [/* Beziehungen zwischen Knoten */],
+  "gaps": [/* Hinweise auf Datenlücken */]
 }
 ```
 
-`gaps` 字段标识追溯链中的断点，提醒用户关注数据不完整的环节。
+Das Feld `gaps` markiert Unterbrechungen der Kette und weist auf Abschnitte mit unvollständigen Daten hin.
 
 ---
 
-## 4. MES 集成
+## 4. MES-Integration
 
-### 4.1 仪表盘
+### 4.1 Dashboard
 
-MES 仪表盘（`/mes/dashboard`）提供以下概览信息：
+Das MES-Dashboard (`/mes/dashboard`) bietet folgende Übersicht:
 
-| 区域 | 内容 | 数据源 |
+| Bereich | Inhalt | Datenquelle |
 |------|------|--------|
-| 设备汇总 | 各设备 OEE（可用率 × 性能 × 质量率）、运行/停机台数 | `mes_equipment_status` |
-| 生产统计 | 计划总产量 vs 实际总产量 | `mes_production_orders` |
-| 不良分布 | 按缺陷类别统计报废量 | `mes_scrap_records` |
-| 报废趋势 | 近 7 天报废趋势 | `mes_scrap_records` |
+| Anlagenübersicht | OEE je Anlage (Verfügbarkeit × Leistung × Qualitätsrate), Anzahl laufender/stehender Anlagen | `mes_equipment_status` |
+| Produktionsstatistik | Geplante vs. tatsächliche Gesamtmenge | `mes_production_orders` |
+| Fehlerverteilung | Ausschussmenge nach Fehlerkategorie | `mes_scrap_records` |
+| Ausschusstrend | Ausschusstrend der letzten 7 Tage | `mes_scrap_records` |
 
-### 4.2 连接管理
+### 4.2 Verbindungsverwaltung
 
-**路由：** `/mes/connections`
+**Route:** `/mes/connections`
 
-#### 4.2.1 连接器类型
+#### 4.2.1 Konnektortypen
 
-| 类型 | 说明 |
+| Typ | Beschreibung |
 |------|------|
-| `mock` | 内置模拟连接器，生成 DC-DC-100 产品线的示例数据 |
-| `rest` | 通用 REST API 连接器，完整支持分页、认证、重试、字段映射、数据校验 |
+| `mock` | Eingebauter Simulationskonnektor mit Beispieldaten der Produktlinie DC-DC-100 |
+| `rest` | Allgemeiner REST-API-Konnektor mit vollständiger Unterstützung für Paginierung, Authentifizierung, Retry, Feldzuordnung und Datenprüfung |
 
-#### 4.2.2 REST 连接器配置
+#### 4.2.2 Konfiguration des REST-Konnektors
 
-与 ERP 连接器类似，但端点配置仅需 4 个数据类型：
+Ähnlich wie beim ERP-Konnektor, aber nur mit Endpunkten für 4 Datentypen:
 
-| 端点键 | 对应数据 | 说明 |
+| Endpunktschlüssel | Daten | Beschreibung |
 |--------|---------|------|
-| `production_orders` | 生产订单 | 工单号、产品型号、工艺路线、计划/实际产量 |
-| `equipment_status` | 设备状态 | 设备编码、名称、OEE、停机原因 |
-| `scrap_records` | 报废记录 | 工单号、缺陷类型、缺陷数量 |
-| `measurements` | 测量数据 | SPC 检验特性数据，推送到 OpenQMS SPC 模块 |
+| `production_orders` | Fertigungsaufträge | Auftragsnummer, Produkttyp, Arbeitsplan, geplante/tatsächliche Menge |
+| `equipment_status` | Anlagenstatus | Anlagencode, Name, OEE, Stillstandsgrund |
+| `scrap_records` | Ausschussdatensätze | Auftragsnummer, Fehlerart, Fehlermenge |
+| `measurements` | Messdaten | Daten von SPC-Prüfmerkmalen, an das SPC-Modul von OpenQMS gesendet |
 
-**认证配置**与 ERP 相同（none / basic / bearer / api_key），加密密钥为 `MES_ENCRYPTION_KEY` 环境变量。
+Die **Authentifizierung** entspricht ERP (none / basic / bearer / api_key); der Verschlüsselungsschlüssel ist die Umgebungsvariable `MES_ENCRYPTION_KEY`.
 
-**推送配置：**
+**Sendekonfiguration:**
 
-当 MES 连接器启用 `push_enabled = true` 时，需配置 `push_event` 端点，OpenQMS 会将 SPC 报警事件通过 Outbox 模式推送到 MES 系统。
+Ist beim MES-Konnektor `push_enabled = true` gesetzt, muss der Endpunkt `push_event` konfiguriert werden; OpenQMS sendet SPC-Alarmereignisse dann über das Outbox-Muster an das MES.
 
-#### 4.2.3 连接生命周期
+#### 4.2.3 Lebenszyklus einer Verbindung
 
-与 ERP 类似，MES 同样使用 `SELECT ... FOR UPDATE SKIP LOCKED` 的 claim_token 并发控制模式，连续失败 3 次自动停用连接。
+Wie beim ERP nutzt auch MES das Nebenläufigkeitsmuster mit claim_token und `SELECT ... FOR UPDATE SKIP LOCKED`; nach 3 aufeinanderfolgenden Fehlschlägen wird die Verbindung automatisch deaktiviert.
 
-**同步机制：** MES 同步按数据类型独立运行，4 个同步任务并行：
+**Synchronisationsmechanismus:** Die MES-Synchronisation läuft je Datentyp unabhängig, 4 Synchronisationsaufgaben parallel:
 
-| 数据类型 | 同步策略 |
+| Datentyp | Synchronisationsstrategie |
 |---------|---------|
-| `production_orders` | UPSERT，按 `connection_id + order_no` 去重 |
+| `production_orders` | UPSERT, Deduplizierung nach `connection_id + order_no` |
 | `equipment_status` | INSERT ON CONFLICT DO NOTHING |
-| `scrap_records` | UPSERT，回填 `order_id` |
-| `measurements` | 去重入库，关联 IC + 创建 SampleBatch + 重新评估 SPC 报警 |
+| `scrap_records` | UPSERT, `order_id` wird nachgetragen |
+| `measurements` | Dedupliziert gespeichert, IC verknüpft + SampleBatch angelegt + SPC-Alarme neu bewertet |
 
-**同步参数：**
+**Synchronisationsparameter:**
 
-| 参数 | 值 | 说明 |
+| Parameter | Wert | Beschreibung |
 |------|---|------|
-| 同步间隔 | 5 分钟 | `SYNC_INTERVAL_MINUTES` |
-| 重叠窗口 | 300 秒 | `OVERLAP_WINDOW_SECONDS` |
-| 超时 | 10 分钟 | `TIMEOUT_MINUTES` |
-| 最大失败次数 | 3 次 | `MAX_FAILURES` |
-| 批次大小 | 100 条 | `BATCH_SIZE` |
+| Synchronisationsintervall | 5 Minuten | `SYNC_INTERVAL_MINUTES` |
+| Überlappungsfenster | 300 Sekunden | `OVERLAP_WINDOW_SECONDS` |
+| Timeout | 10 Minuten | `TIMEOUT_MINUTES` |
+| Maximale Fehlschläge | 3 | `MAX_FAILURES` |
+| Stapelgröße | 100 | `BATCH_SIZE` |
 
-#### 4.2.4 数据生命周期管理
+#### 4.2.4 Datenlebenszyklus
 
-MES 模块内置数据生命周期清理机制：
+Das MES-Modul enthält eine eingebaute Bereinigung nach Datenlebenszyklus:
 
-| 数据类型 | 保留期 | 处理方式 |
+| Datentyp | Aufbewahrung | Behandlung |
 |---------|--------|---------|
-| 设备状态 | 90 天 | 直接删除 |
-| 报废记录 | 365 天 | 先聚合到 `mes_scrap_monthly_summary`，再删除明细 |
-| 已关闭生产订单 | 730 天 | 归档到 `mes_production_orders_archive` |
+| Anlagenstatus | 90 Tage | Direkt löschen |
+| Ausschussdatensätze | 365 Tage | Erst in `mes_scrap_monthly_summary` aggregieren, dann Details löschen |
+| Abgeschlossene Fertigungsaufträge | 730 Tage | Archivierung in `mes_production_orders_archive` |
 
-清理任务使用 `pg_try_advisory_xact_lock(42)` 防止并发执行。
+Die Bereinigung verhindert parallele Ausführung mit `pg_try_advisory_xact_lock(42)`.
 
-### 4.3 生产订单
+### 4.3 Fertigungsaufträge
 
-**路由：** `/mes/orders`
+**Route:** `/mes/orders`
 
-展示从 MES 同步的生产订单数据：
+Zeigt aus dem MES synchronisierte Fertigungsaufträge:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `order_no` | 工单号（唯一标识，同连接内去重） |
-| `product_model` | 产品型号 |
-| `process_route` | 工艺路线 |
-| `planned_qty` | 计划产量 |
-| `actual_qty` | 实际产量 |
-| `status` | 订单状态：`planned` / `in_progress` / `completed` / `closed` |
-| `started_at` | 开始时间 |
-| `completed_at` | 完成时间 |
+| `order_no` | Auftragsnummer (eindeutige Kennung, innerhalb der Verbindung dedupliziert) |
+| `product_model` | Produkttyp |
+| `process_route` | Arbeitsplan |
+| `planned_qty` | Geplante Menge |
+| `actual_qty` | Tatsächliche Menge |
+| `status` | Auftragsstatus: `planned` / `in_progress` / `completed` / `closed` |
+| `started_at` | Startzeit |
+| `completed_at` | Fertigstellungszeit |
 
-支持按状态、时间范围等条件筛选和分页查询。
+Filter nach Status, Zeitraum usw. sowie Paginierung werden unterstützt.
 
-### 4.4 报废追踪
+### 4.4 Ausschussverfolgung
 
-**路由：** `/mes/scrap`
+**Route:** `/mes/scrap`
 
-展示从 MES 同步的报废/不良品记录：
+Zeigt aus dem MES synchronisierte Ausschuss-/Fehlteildatensätze:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `order_no` | 关联工单号 |
-| `order_id` | 关联工单 ID（外键） |
-| `equipment_code` | 发生设备编码 |
-| `defect_type` | 缺陷类型 |
-| `defect_category` | 缺陷分类 |
-| `defect_qty` | 缺陷数量 |
-| `total_qty` | 总检验数量 |
-| `defect_description` | 缺陷描述 |
+| `order_no` | Verknüpfte Auftragsnummer |
+| `order_id` | Verknüpfte Auftrags-ID (Fremdschlüssel) |
+| `equipment_code` | Anlagencode |
+| `defect_type` | Fehlerart |
+| `defect_category` | Fehlerkategorie |
+| `defect_qty` | Fehlermenge |
+| `total_qty` | Geprüfte Gesamtmenge |
+| `defect_description` | Fehlerbeschreibung |
 
-报废记录与生产订单通过 `order_id` 关联，支持按工单、设备、缺陷类型等维度分析。
+Ausschussdatensätze sind über `order_id` mit Fertigungsaufträgen verknüpft und lassen sich nach Auftrag, Anlage, Fehlerart usw. analysieren.
 
-### 4.5 SPC 联动
+### 4.5 SPC-Kopplung
 
-MES 模块最核心的跨模块联动是 **测量数据 → SPC**：
+Die zentrale modulübergreifende Kopplung des MES ist **Messdaten → SPC**:
 
-1. MES 系统通过 Ingest API 或同步拉取推送测量数据
-2. 数据写入 `mes_measurement_ingestions`，按 `(connection_id, external_id)` 去重
-3. 系统查找对应的 InspectionCharacteristic（检验特性），创建 SampleBatch
-4. 触发 SPC 报警规则重新评估
-5. 若产生报警且连接器启用 `push_enabled`，将报警事件写入 `MESPushOutbox`
-6. Push Worker 将报警推送回 MES 系统
+1. Das MES sendet Messdaten über die Ingest-API oder per Abholung
+2. Daten werden in `mes_measurement_ingestions` geschrieben und nach `(connection_id, external_id)` dedupliziert
+3. Das System sucht das zugehörige InspectionCharacteristic (Prüfmerkmal) und legt ein SampleBatch an
+4. Die SPC-Alarmregeln werden neu bewertet
+5. Entsteht ein Alarm und ist beim Konnektor `push_enabled` gesetzt, wird das Alarmereignis in `MESPushOutbox` geschrieben
+6. Der Push-Worker sendet den Alarm zurück an das MES
 
-**推送事件格式：** SPC 报警事件包含检验特性 ID、报警规则、触发时间、样本数据等，MES 系统可据此触发停线或加检。
+**Format der Sendeereignisse:** SPC-Alarmereignisse enthalten Prüfmerkmal-ID, Alarmregel, Auslösezeit, Stichprobendaten usw.; das MES kann daraufhin Linienstopp oder zusätzliche Prüfung auslösen.
 
 ---
 
-## 5. PLM 集成
+## 5. PLM-Integration
 
-### 5.1 仪表盘
+### 5.1 Dashboard
 
-PLM 仪表盘（`/plm/dashboard`）提供以下概览信息：
+Das PLM-Dashboard (`/plm/dashboard`) bietet folgende Übersicht:
 
-| 区域 | 内容 | 数据源 |
+| Bereich | Inhalt | Datenquelle |
 |------|------|--------|
-| 零件统计 | 零件总数 | `plm_parts` |
-| BOM 统计 | BOM 条目总数 | `plm_boms` |
-| 待处理 ECN | 待审批变更单数量 | `plm_change_orders` |
-| 待确认特殊特性 | 安全/关键特性待确认数 | `plm_part_sc_links` (status=pending) |
-| 最近变更 | 最近的变更单列表 | `plm_change_orders` |
+| Teilestatistik | Anzahl Teile | `plm_parts` |
+| Stücklistenstatistik | Anzahl Stücklistenpositionen | `plm_boms` |
+| Offene ECN | Anzahl freizugebender Änderungsaufträge | `plm_change_orders` |
+| Zu bestätigende besondere Merkmale | Anzahl zu bestätigender Sicherheits-/kritischer Merkmale | `plm_part_sc_links` (status=pending) |
+| Letzte Änderungen | Liste der letzten Änderungsaufträge | `plm_change_orders` |
 
-### 5.2 连接管理
+### 5.2 Verbindungsverwaltung
 
-**路由：** `/plm/connections`
+**Route:** `/plm/connections`
 
-#### 5.2.1 连接器类型
+#### 5.2.1 Konnektortypen
 
-| 类型 | 说明 | 实现状态 |
+| Typ | Beschreibung | Umsetzungsstand |
 |------|------|---------|
-| `mock` | 内置模拟连接器，生成 DC-DC-100 产品线示例数据 | 已实现 |
-| `rest` | 通用 REST API 连接器 | 框架已实现，数据拉取方法为 TODO |
-| `siemens_tc` | Siemens Teamcenter 连接器 | 框架已实现（映射到 RESTPLMConnector） |
-| `dassault_enovia` | Dassault ENOVIA 连接器 | 框架已实现（映射到 RESTPLMConnector） |
-| `ptc_windchill` | PTC Windchill 连接器 | 框架已实现（映射到 RESTPLMConnector） |
+| `mock` | Eingebauter Simulationskonnektor mit Beispieldaten der Produktlinie DC-DC-100 | Umgesetzt |
+| `rest` | Allgemeiner REST-API-Konnektor | Gerüst umgesetzt, Abrufmethoden noch TODO |
+| `siemens_tc` | Konnektor Siemens Teamcenter | Gerüst umgesetzt (abgebildet auf RESTPLMConnector) |
+| `dassault_enovia` | Konnektor Dassault ENOVIA | Gerüst umgesetzt (abgebildet auf RESTPLMConnector) |
+| `ptc_windchill` | Konnektor PTC Windchill | Gerüst umgesetzt (abgebildet auf RESTPLMConnector) |
 
-> **重要：** 当前仅 `mock` 类型可通过 API 创建连接。后端校验 `IMPLEMENTED_CONNECTOR_TYPES = {"mock"}`，创建其他类型会返回 400 错误。`rest`、`siemens_tc`、`dassault_enovia`、`ptc_windchill` 的连接器骨架已搭建，但数据拉取方法均抛出 `NotImplementedError`。
+> **Wichtig:** Derzeit können über die API nur Verbindungen vom Typ `mock` angelegt werden. Das Backend prüft `IMPLEMENTED_CONNECTOR_TYPES = {"mock"}`; andere Typen liefern einen Fehler 400. Die Konnektorgerüste für `rest`, `siemens_tc`, `dassault_enovia` und `ptc_windchill` existieren, ihre Abrufmethoden werfen aber `NotImplementedError`.
 
-#### 5.2.2 Mock 连接器示例数据
+#### 5.2.2 Beispieldaten des Mock-Konnektors
 
-Mock 连接器生成的 DC-DC-100 示例数据：
+Der Mock-Konnektor erzeugt folgende Beispieldaten für DC-DC-100:
 
-**零件 (5 个)：**
+**Teile (5):**
 
-| 零件号 | 名称 | 特殊标记 |
+| Teilenummer | Name | Besondere Kennzeichnung |
 |--------|------|---------|
-| DC-DC-100-ASM | DC-DC-100 总成 | safety + key_characteristic |
-| PCBA-MAIN-01 | 主控板组件 | key_characteristic |
-| HOUSING-TOP-01 | 上壳体 | — |
-| HEATSINK-01 | 散热器 | — |
-| CAP-CER-100UF | 陶瓷电容 100μF | — |
+| DC-DC-100-ASM | Baugruppe DC-DC-100 | safety + key_characteristic |
+| PCBA-MAIN-01 | Steuerplatinen-Baugruppe | key_characteristic |
+| HOUSING-TOP-01 | Obergehäuse | — |
+| HEATSINK-01 | Kühlkörper | — |
+| CAP-CER-100UF | Keramikkondensator 100 μF | — |
 
-**BOM (5 条，3 层结构)：**
+**Stückliste (5 Positionen, 3 Ebenen):**
 
 ```
 DC-DC-100-ASM (L0)
@@ -476,52 +476,52 @@ DC-DC-100-ASM (L0)
     └── CAP-CER-100UF (L2, qty=2)
 ```
 
-**变更单 (2 条)：**
+**Änderungsaufträge (2):**
 
-| 变更号 | 标题 | 状态 | 优先级 |
+| Änderungsnummer | Titel | Status | Priorität |
 |--------|------|------|--------|
-| ECN-2026-001 | 散热器材料升级 | approved | high |
-| ECN-2026-002 | 陶瓷电容规格调整 | draft | normal |
+| ECN-2026-001 | Werkstoff-Upgrade des Kühlkörpers | approved | high |
+| ECN-2026-002 | Spezifikationsanpassung des Keramikkondensators | draft | normal |
 
-#### 5.2.3 同步机制
+#### 5.2.3 Synchronisationsmechanismus
 
-PLM 同步采用 3 阶段调度：
+Die PLM-Synchronisation läuft in 3 Phasen:
 
-| 阶段 | 数据类型 | 说明 |
+| Phase | Datentyp | Beschreibung |
 |------|---------|------|
-| Phase 1 | `part` | 零件主数据（含安全/关键特性自动创建 SC Link） |
-| Phase 2 | `bom` | BOM 结构（6 列唯一约束去重） |
-| Phase 3 | `change_order` | 变更单（状态变为 `approved` 时自动创建变更影响分析任务） |
+| Phase 1 | `part` | Teilestammdaten (automatische SC-Verknüpfung für Sicherheits-/kritische Merkmale) |
+| Phase 2 | `bom` | Stücklistenstruktur (Deduplizierung über eindeutigen Constraint auf 6 Spalten) |
+| Phase 3 | `change_order` | Änderungsaufträge (bei Status `approved` wird automatisch eine Änderungsauswirkungsanalyse angelegt) |
 
-同步同样使用 claim_token 并发控制模式，连续失败 3 次自动停用连接。
+Auch hier gilt das claim_token-Muster; nach 3 aufeinanderfolgenden Fehlschlägen wird die Verbindung automatisch deaktiviert.
 
-### 5.3 零件与 BOM
+### 5.3 Teile und Stücklisten
 
-**路由：** `/plm/parts`
+**Route:** `/plm/parts`
 
-#### 5.3.1 零件列表
+#### 5.3.1 Teileliste
 
-展示从 PLM 同步的零件数据：
+Zeigt aus dem PLM synchronisierte Teiledaten:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `part_number` | 零件号（同连接+版本号唯一） |
-| `name` | 零件名称 |
-| `revision` | 版本号（默认 "A"） |
-| `material` | 材料 |
-| `specification` | 规格描述 |
-| `status` | 状态 |
-| `is_safety_related` | 是否安全相关 |
-| `is_key_characteristic` | 是否关键特性 |
-| `sc_links` | 关联的特殊特性列表 |
+| `part_number` | Teilenummer (eindeutig je Verbindung + Version) |
+| `name` | Teilename |
+| `revision` | Version (Standard „A“) |
+| `material` | Werkstoff |
+| `specification` | Spezifikation |
+| `status` | Status |
+| `is_safety_related` | Sicherheitsrelevant ja/nein |
+| `is_key_characteristic` | Kritisches Merkmal ja/nein |
+| `sc_links` | Liste verknüpfter besonderer Merkmale |
 
-**特殊特性联动：**
+**Kopplung besonderer Merkmale:**
 
-当零件的 `is_safety_related = true` 时，同步自动创建 `PLMPartSCLink`（`characteristic_type = "safety"`, `status = "pending"`）；当 `is_key_characteristic = true` 时，自动创建 `characteristic_type = "key_characteristic"` 的 SC Link。
+Bei `is_safety_related = true` legt die Synchronisation automatisch ein `PLMPartSCLink` an (`characteristic_type = "safety"`, `status = "pending"`); bei `is_key_characteristic = true` einen SC-Link mit `characteristic_type = "key_characteristic"`.
 
-#### 5.3.2 BOM 树
+#### 5.3.2 Stücklistenbaum
 
-通过 `/api/plm/connections/{id}/boms/tree/{part_number}` 接口可获取指定零件的完整 BOM 展开树：
+Über `/api/plm/connections/{id}/boms/tree/{part_number}` lässt sich der vollständig aufgelöste Stücklistenbaum eines Teils abrufen:
 
 ```json
 {
@@ -538,9 +538,9 @@ PLM 同步采用 3 阶段调度：
 }
 ```
 
-#### 5.3.3 零件关联 FMEA
+#### 5.3.3 Teil mit FMEA verknüpfen
 
-通过 `/api/plm/parts/{part_id}/link-fmea` 可将零件关联到 FMEA 文档的特定节点：
+Über `/api/plm/parts/{part_id}/link-fmea` wird ein Teil mit einem bestimmten Knoten eines FMEA-Dokuments verknüpft:
 
 ```json
 {
@@ -550,13 +550,13 @@ PLM 同步采用 3 阶段调度：
 }
 ```
 
-`link_type` 取值：`auto_import`（BOM 导入自动创建）或 `manual`（手动关联）。
+Werte von `link_type`: `auto_import` (automatisch beim Stücklistenimport) oder `manual` (manuell).
 
-#### 5.3.4 确认特殊特性
+#### 5.3.4 Besondere Merkmale bestätigen
 
-通过 `/api/plm/parts/{part_id}/confirm-sc` 确认零件的特殊特性标记，需同时满足：
-- PLM 模块 EDIT (3) 权限
-- SPECIAL_CHARACTERISTIC 模块 CREATE (2) 权限
+Über `/api/plm/parts/{part_id}/confirm-sc` wird die Kennzeichnung besonderer Merkmale eines Teils bestätigt; Voraussetzungen:
+- EDIT (3) im PLM-Modul
+- CREATE (2) im Modul SPECIAL_CHARACTERISTIC
 
 ```json
 {
@@ -566,9 +566,9 @@ PLM 同步采用 3 阶段调度：
 }
 ```
 
-#### 5.3.5 导入 BOM 到 FMEA
+#### 5.3.5 Stückliste in FMEA importieren
 
-通过 `/api/plm/connections/{id}/boms/{part_number}/import-to-fmea` 可将 BOM 结构导入到指定 FMEA 文档：
+Über `/api/plm/connections/{id}/boms/{part_number}/import-to-fmea` wird die Stücklistenstruktur in ein bestimmtes FMEA-Dokument importiert:
 
 ```json
 {
@@ -577,95 +577,95 @@ PLM 同步采用 3 阶段调度：
 }
 ```
 
-系统将 BOM 树结构转换为 FMEA 图谱节点和边，创建 `PLMPartFMEALink`（`link_type = "auto_import"`）。
+Das System wandelt den Stücklistenbaum in FMEA-Graphknoten und -kanten um und legt `PLMPartFMEALink` an (`link_type = "auto_import"`).
 
-### 5.4 变更单
+### 5.4 Änderungsaufträge
 
-**路由：** `/plm/change-orders`
+**Route:** `/plm/change-orders`
 
-展示从 PLM 同步的工程变更单 (ECN)：
+Zeigt aus dem PLM synchronisierte technische Änderungsaufträge (ECN):
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `change_number` | 变更单号（同连接唯一） |
-| `title` | 变更标题 |
-| `description` | 变更描述 |
-| `change_type` | 变更类型 |
-| `status` | 状态（draft / approved / implemented / closed） |
-| `priority` | 优先级 |
-| `affected_part_numbers` | 受影响零件列表 (JSONB) |
-| `proposed_changes` | 建议变更内容 (JSONB) |
-| `requested_by` | 申请人 |
-| `approved_by` | 审批人 |
-| `planned_implementation_date` | 计划实施日期 |
-| `actual_implementation_date` | 实际实施日期 |
+| `change_number` | Änderungsnummer (eindeutig je Verbindung) |
+| `title` | Änderungstitel |
+| `description` | Änderungsbeschreibung |
+| `change_type` | Änderungsart |
+| `status` | Status (draft / approved / implemented / closed) |
+| `priority` | Priorität |
+| `affected_part_numbers` | Liste betroffener Teile (JSONB) |
+| `proposed_changes` | Vorgeschlagene Änderungen (JSONB) |
+| `requested_by` | Antragsteller |
+| `approved_by` | Freigebende Person |
+| `planned_implementation_date` | Geplantes Umsetzungsdatum |
+| `actual_implementation_date` | Tatsächliches Umsetzungsdatum |
 
-#### 5.4.1 变更影响分析
+#### 5.4.1 Änderungsauswirkungsanalyse
 
-当变更单状态变为 `approved` 时，系统自动创建 `PLMChangeImpactTask`。也可通过 API `/api/plm/change-orders/{change_id}/impact-analysis` 手动触发。
+Wechselt ein Änderungsauftrag auf `approved`, legt das System automatisch einen `PLMChangeImpactTask` an. Manuell lässt sich die Analyse über `/api/plm/change-orders/{change_id}/impact-analysis` auslösen.
 
-影响分析流程：
+Ablauf der Auswirkungsanalyse:
 
-1. 获取变更单的 `affected_part_numbers`
-2. 通过 `PLMPartFMEALink` 查找受影响的 FMEA 文档和节点
-3. 调用 `ChangeImpactService.analyze()` 对每个受影响节点执行影响分析
-4. 返回分析结果
+1. `affected_part_numbers` des Änderungsauftrags lesen
+2. Betroffene FMEA-Dokumente und Knoten über `PLMPartFMEALink` ermitteln
+3. `ChangeImpactService.analyze()` für jeden betroffenen Knoten aufrufen
+4. Analyseergebnis zurückgeben
 
 ---
 
-## 6. 连接配置说明
+## 6. Hinweise zur Verbindungskonfiguration
 
-### 6.1 创建连接
+### 6.1 Verbindung anlegen
 
-1. 进入对应模块的「连接管理」页面
-2. 点击「新建连接」按钮
-3. 填写基本信息：
-   - **名称：** 连接的显示名称
-   - **连接器类型：** 选择 `mock`（测试）或 `rest`（生产）
-   - **产品线：** 选择对应的产品线编码
-4. 如果选择 `rest` 类型，需继续配置：
-   - **API 基地址：** 外部系统的 URL
-   - **认证方式：** 选择 none / basic / bearer / api_key
-   - **各数据类型端点：** 逐一配置每个数据类型的 API 路径
-   - **字段映射：** 外部字段到 OpenQMS 字段的映射关系
-5. 点击「创建」
+1. Die Seite „Verbindungsverwaltung“ des jeweiligen Moduls öffnen
+2. Auf „Neue Verbindung“ klicken
+3. Grunddaten eingeben:
+   - **Name:** Anzeigename der Verbindung
+   - **Konnektortyp:** `mock` (Test) oder `rest` (Produktion) wählen
+   - **Produktlinie:** passenden Produktliniencode wählen
+4. Bei Typ `rest` zusätzlich konfigurieren:
+   - **API-Basisadresse:** URL des externen Systems
+   - **Authentifizierung:** none / basic / bearer / api_key
+   - **Endpunkte je Datentyp:** API-Pfad für jeden Datentyp
+   - **Feldzuordnung:** Zuordnung externer Felder zu OpenQMS-Feldern
+5. Auf „Anlegen“ klicken
 
-### 6.2 测试连接
+### 6.2 Verbindung testen
 
-创建连接后，在连接列表中点击「测试」按钮。系统会尝试：
+Nach dem Anlegen in der Verbindungsliste auf „Testen“ klicken. Das System versucht:
 
-- **ERP：** 从外部系统拉取 1 条供应商数据，返回 `{success, message}`
-- **MES：** 从外部系统拉取 1 条生产订单数据，返回 `{ok, error}`
-- **PLM：** 尝试拉取零件数据，返回 `{status, parts_count}` 或 `{status, error, error_class}`
+- **ERP:** einen Lieferantendatensatz abzuholen, Rückgabe `{success, message}`
+- **MES:** einen Fertigungsauftrag abzuholen, Rückgabe `{ok, error}`
+- **PLM:** Teiledaten abzuholen, Rückgabe `{status, parts_count}` oder `{status, error, error_class}`
 
-测试成功仅表示连接可用，不代表全部数据类型端点都正确。
+Ein erfolgreicher Test zeigt nur, dass die Verbindung nutzbar ist, nicht dass alle Endpunkte korrekt sind.
 
-### 6.3 数据同步
+### 6.3 Datensynchronisation
 
-#### 手动同步
+#### Manuelle Synchronisation
 
-在连接列表中点击「同步」按钮，系统立即触发一次全量同步：
+In der Verbindungsliste auf „Synchronisieren“ klicken; das System startet sofort eine vollständige Synchronisation:
 
-- **ERP：** 按 4 阶段 DAG 顺序拉取所有 9 种数据类型
-- **MES：** 并行拉取 4 种数据类型
-- **PLM：** 按 3 阶段拉取零件 → BOM → 变更单
+- **ERP:** alle 9 Datentypen in der DAG-Reihenfolge der 4 Phasen
+- **MES:** 4 Datentypen parallel
+- **PLM:** in 3 Phasen Teile → Stücklisten → Änderungsaufträge
 
-#### 自动同步
+#### Automatische Synchronisation
 
-系统后台按配置的同步间隔自动执行同步任务，使用 `SELECT ... FOR UPDATE SKIP LOCKED` 确保不会重复执行。
+Im Hintergrund läuft die Synchronisation im konfigurierten Intervall; `SELECT ... FOR UPDATE SKIP LOCKED` verhindert doppelte Ausführung.
 
-#### 推送 (Ingest) 模式
+#### Sendemodus (Ingest)
 
-外部系统也可主动推送数据到 OpenQMS：
+Externe Systeme können Daten auch aktiv an OpenQMS senden:
 
-**请求头：**
+**Request-Header:**
 
-| 模块 | 必需头 |
+| Modul | Pflicht-Header |
 |------|--------|
 | ERP | `X-API-Key: <api_key>` |
 | MES | `X-API-Key: <api_key>` + `X-Connection-Id: <connection_id>` |
 
-**ERP Ingest 请求体：**
+**Request-Body ERP-Ingest:**
 
 ```json
 {
@@ -675,119 +675,119 @@ PLM 同步采用 3 阶段调度：
 }
 ```
 
-`data_type` 允许值：`suppliers`, `customers`, `materials`, `locations`, `purchase_orders`, `sales_orders`, `inventory_balances`, `shipments`, `cost_records`
+Erlaubte Werte für `data_type`: `suppliers`, `customers`, `materials`, `locations`, `purchase_orders`, `sales_orders`, `inventory_balances`, `shipments`, `cost_records`
 
-**MES Ingest 请求体：** 使用区分联合类型 (Discriminated Union)，需指定 `data_type` 字段：
+**Request-Body MES-Ingest:** Verwendet eine Discriminated Union; das Feld `data_type` muss angegeben werden:
 
 - `production_orders`
 - `equipment_status`
 - `scrap_records`
 - `measurements`
 
-### 6.4 连接加密
+### 6.4 Verschlüsselung der Verbindungen
 
-所有连接的认证信息（密码、Token、API Key）均使用 Fernet 对称加密存储：
+Alle Authentifizierungsdaten (Passwort, Token, API-Key) werden mit Fernet symmetrisch verschlüsselt gespeichert:
 
-| 模块 | 环境变量 | 用途 |
+| Modul | Umgebungsvariable | Zweck |
 |------|---------|------|
-| ERP | `ERP_ENCRYPTION_KEY` | 加密出站认证凭据、哈希入站 API Key |
-| MES | `MES_ENCRYPTION_KEY` | 同上 |
+| ERP | `ERP_ENCRYPTION_KEY` | Verschlüsselt ausgehende Zugangsdaten, hasht eingehende API-Keys |
+| MES | `MES_ENCRYPTION_KEY` | Wie oben |
 
-**安全措施：**
+**Sicherheitsmaßnahmen:**
 
-- 出站认证凭据（密码、Token）使用 Fernet 加密存储
-- 入站 API Key 使用 SHA-256 哈希存储，验证时使用计时安全比较 (`hmac.compare_digest`)
-- API 响应中自动脱敏：移除 `auth_config`、`*_encrypted`、`*_hash` 字段
+- Ausgehende Zugangsdaten (Passwort, Token) werden Fernet-verschlüsselt gespeichert
+- Eingehende API-Keys werden als SHA-256-Hash gespeichert und zeitkonstant verglichen (`hmac.compare_digest`)
+- API-Antworten werden automatisch geschwärzt: `auth_config`, `*_encrypted`, `*_hash` werden entfernt
 
 ---
 
-## 7. 常见问题
+## 7. Häufige Fragen
 
-### Q1：创建 REST 连接器时提示 "不支持的连接器类型"
+### F1: Beim Anlegen eines REST-Konnektors erscheint „nicht unterstützter Konnektortyp“
 
-**原因：** PLM 模块当前仅允许创建 `mock` 类型连接（`IMPLEMENTED_CONNECTOR_TYPES = {"mock"}`），`rest`、`siemens_tc` 等类型的连接器数据拉取方法尚未实现。
+**Ursache:** Das PLM-Modul erlaubt derzeit nur Verbindungen vom Typ `mock` (`IMPLEMENTED_CONNECTOR_TYPES = {"mock"}`); die Abrufmethoden von `rest`, `siemens_tc` usw. sind noch nicht umgesetzt.
 
-**解决方案：** 使用 `mock` 连接器进行功能演示和测试；生产环境需等待后续版本支持 REST 连接器。
+**Lösung:** Für Demo und Test den `mock`-Konnektor verwenden; für die Produktion auf künftige Unterstützung des REST-Konnektors warten.
 
-### Q2：同步一直失败，连接被自动停用
+### F2: Die Synchronisation schlägt dauerhaft fehl, die Verbindung wurde automatisch deaktiviert
 
-**原因：** 连续 3 次同步失败后，系统自动将连接标记为 `is_active = false` 并写入审计日志。
+**Ursache:** Nach 3 aufeinanderfolgenden Fehlschlägen setzt das System die Verbindung auf `is_active = false` und schreibt ein Audit-Log.
 
-**解决方案：**
-1. 检查外部系统是否可达（使用「测试连接」功能）
-2. 检查认证配置是否正确（API Key、用户名密码等）
-3. 检查端点 URL 是否正确（特别是字段映射是否匹配外部系统的响应格式）
-4. 修正后重新激活连接并触发手动同步
+**Lösung:**
+1. Erreichbarkeit des externen Systems prüfen (Funktion „Verbindung testen“)
+2. Authentifizierungskonfiguration prüfen (API-Key, Benutzername/Passwort usw.)
+3. Endpunkt-URLs prüfen (insbesondere ob die Feldzuordnung zum Antwortformat des externen Systems passt)
+4. Nach der Korrektur die Verbindung reaktivieren und manuell synchronisieren
 
-### Q3：MES 前端页面可见但 API 返回 403
+### F3: MES-Seiten sind sichtbar, aber die API liefert 403
 
-**原因：** MES 前端路由未设置 `requiredModule` 守卫，仅检查登录状态。但后端 API 仍通过 `get_user_permission(user, Module.MES, db)` 校验权限。如果当前用户对 MES 模块没有 VIEW 权限，API 将返回 403。
+**Ursache:** Die MES-Frontend-Routen haben keinen Schutz über `requiredModule` und prüfen nur die Anmeldung. Die Backend-API prüft aber weiterhin über `get_user_permission(user, Module.MES, db)`. Ohne VIEW im MES-Modul liefert die API 403.
 
-**解决方案：** 在权限配置中为该用户角色赋予 MES 模块 VIEW (1) 或以上权限。
+**Lösung:** Der Benutzerrolle in der Berechtigungskonfiguration mindestens VIEW (1) im MES-Modul geben.
 
-### Q4：ERP 供应商/客户信息显示为掩码
+### F4: ERP-Lieferanten-/Kundeninformationen werden maskiert angezeigt
 
-**原因：** VIEW 权限级别下，供应商银行信息、客户税务信息等敏感字段会自动脱敏。需要 APPROVE (4) 或以上权限才能查看完整信息。
+**Ursache:** Mit VIEW werden sensible Felder wie Bankdaten von Lieferanten oder Steuerdaten von Kunden automatisch geschwärzt. Für vollständige Informationen ist mindestens APPROVE (4) nötig.
 
-**解决方案：** 使用 manager 或 admin 角色登录，或在权限配置中提升当前角色的 ERP 权限等级。
+**Lösung:** Mit Rolle manager oder admin anmelden oder die ERP-Berechtigung der aktuellen Rolle erhöhen.
 
-### Q5：PLM 变更影响分析没有结果
+### F5: Die PLM-Änderungsauswirkungsanalyse liefert kein Ergebnis
 
-**可能原因：**
+**Mögliche Ursachen:**
 
-1. 变更单的 `affected_part_numbers` 为空
-2. 受影响的零件尚未关联到 FMEA 文档（没有 `PLMPartFMEALink` 记录）
-3. 变更单状态不是 `approved`（自动触发仅在状态变为 approved 时）
+1. `affected_part_numbers` des Änderungsauftrags ist leer
+2. Die betroffenen Teile sind noch mit keinem FMEA-Dokument verknüpft (kein `PLMPartFMEALink`)
+3. Der Änderungsauftrag ist nicht `approved` (automatische Auslösung nur beim Wechsel auf approved)
 
-**解决方案：** 先通过「零件关联 FMEA」功能将受影响零件关联到对应 FMEA 文档节点，再触发影响分析。
+**Lösung:** Betroffene Teile zuerst über „Teil mit FMEA verknüpfen“ mit den passenden FMEA-Knoten verknüpfen und dann die Analyse auslösen.
 
-### Q6：MES 推送报警事件失败
+### F6: Das Senden von Alarmereignissen an das MES schlägt fehl
 
-**原因：** 推送使用 Outbox 模式，采用指数退避重试（间隔 = 2^retry_count 分钟，最大 32 分钟）。
+**Ursache:** Das Senden nutzt das Outbox-Muster mit exponentiellem Backoff (Intervall = 2^retry_count Minuten, höchstens 32 Minuten).
 
-**排查步骤：**
-1. 检查 MES 连接器是否启用 `push_enabled`
-2. 检查 `push_event` 端点配置是否正确
-3. 查看 `mes_push_outbox` 表中失败记录的 `retry_count` 和错误信息
-4. 确认外部 MES 系统的推送接收接口可用
+**Prüfschritte:**
+1. Prüfen, ob beim MES-Konnektor `push_enabled` gesetzt ist
+2. Prüfen, ob der Endpunkt `push_event` korrekt konfiguriert ist
+3. In der Tabelle `mes_push_outbox` `retry_count` und Fehlermeldung fehlgeschlagener Einträge ansehen
+4. Sicherstellen, dass die Empfangsschnittstelle des externen MES verfügbar ist
 
-### Q7：ERP 追溯结果显示 "gaps"（数据缺口）
+### F7: Die ERP-Rückverfolgung zeigt „gaps“ (Datenlücken)
 
-**原因：** 追溯链路中存在数据不完整的环节，例如：
+**Ursache:** Die Rückverfolgungskette enthält Abschnitte mit unvollständigen Daten, zum Beispiel:
 
-- 采购订单缺少批次号
-- 发运记录未关联到 OpenQMS 发运检验记录（`openqms_shipment_id` 为空）
-- 库存余额缺少供应商批次号
+- Einkaufsaufträgen fehlt die Chargennummer
+- Versanddatensätze sind nicht mit OpenQMS-Versandprüfdatensätzen verknüpft (`openqms_shipment_id` leer)
+- Bestandssalden fehlt die Lieferantencharge
 
-**解决方案：** 补全外部系统中的关键字段（批次号、供应商批次号等），或通过 Ingest API 补充数据后重新同步。
+**Lösung:** Schlüsselfelder im externen System ergänzen (Chargennummer, Lieferantencharge usw.) oder Daten über die Ingest-API ergänzen und neu synchronisieren.
 
-### Q8：如何查看同步任务状态？
+### F8: Wie sehe ich den Status der Synchronisationsaufgaben?
 
-**解决方案：** 各模块的 `*_sync_jobs` 表记录了每个数据类型的同步状态、检查点（checkpoint）和连续失败次数。可通过 ERP/MES/PLM 仪表盘查看同步健康状态，或直接查询数据库：
+**Lösung:** Die Tabellen `*_sync_jobs` der Module erfassen je Datentyp Synchronisationsstatus, Checkpoint und Anzahl aufeinanderfolgender Fehlschläge. Der Synchronisationszustand ist im ERP-/MES-/PLM-Dashboard sichtbar oder direkt per Datenbankabfrage:
 
 ```sql
--- 查看 ERP 同步任务状态
+-- Status der ERP-Synchronisationsaufgaben ansehen
 SELECT job_id, data_type, status, checkpoint, consecutive_failures
 FROM erp_sync_jobs WHERE connection_id = '...';
 
--- 查看 MES 同步任务状态
+-- Status der MES-Synchronisationsaufgaben ansehen
 SELECT job_id, data_type, status, checkpoint, consecutive_failures
 FROM mes_sync_jobs WHERE connection_id = '...';
 
--- 查看PLM 同步任务状态
+-- Status der PLM-Synchronisationsaufgaben ansehen
 SELECT job_id, data_type, status, checkpoint, consecutive_failures
 FROM plm_sync_jobs WHERE connection_id = '...';
 ```
 
-### Q9：PLM 确认特殊特性提示权限不足
+### F9: Beim Bestätigen besonderer Merkmale in PLM erscheint „Berechtigung nicht ausreichend“
 
-**原因：** `confirm_part_sc` 接口需要同时满足两个权限条件：
+**Ursache:** Die Schnittstelle `confirm_part_sc` verlangt zwei Rechte zugleich:
 
-1. PLM 模块 EDIT (3) 权限
-2. SPECIAL_CHARACTERISTIC 模块 CREATE (2) 权限
+1. EDIT (3) im PLM-Modul
+2. CREATE (2) im Modul SPECIAL_CHARACTERISTIC
 
-**解决方案：** 确认当前用户角色在这两个模块上分别达到所需权限等级。例如 `field_qe` 角色 PLM 权限为 2 (CREATE)，不满足 EDIT (3) 要求，因此无法确认特殊特性。
+**Lösung:** Sicherstellen, dass die Rolle in beiden Modulen die nötige Stufe erreicht. Beispielsweise hat die Rolle `field_qe` im PLM-Modul Stufe 2 (CREATE) und erfüllt EDIT (3) nicht, kann also keine besonderen Merkmale bestätigen.
 
-### Q10：Mock 连接器的数据可以修改吗？
+### F10: Lassen sich die Daten des Mock-Konnektors ändern?
 
-Mock 连接器每次同步都会重新生成固定的示例数据（DC-DC-100 产品线），不支持自定义。如需使用真实数据，请配置 REST 连接器对接实际 ERP/MES/PLM 系统。Mock 数据仅用于功能演示和测试。
+Der Mock-Konnektor erzeugt bei jeder Synchronisation dieselben festen Beispieldaten (Produktlinie DC-DC-100) und ist nicht anpassbar. Für echte Daten einen REST-Konnektor an das tatsächliche ERP/MES/PLM anbinden. Mock-Daten dienen nur Demo und Test.

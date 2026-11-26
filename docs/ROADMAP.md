@@ -1,416 +1,223 @@
-# OpenQMS 开发路线图
+# OpenQMS-Entwicklungsfahrplan
 
-**更新日期**: 2026-09-06
-**当前阶段**: Release Candidate 稳定化门禁已通过（待分支评审与集成）
-**产品范围**: Phase 1–4 + Phase 4+ 已完成；进入分支评审与试点准备
-**版本目标**: v3.0（全功能发布）
+**Stand**: 2026-09-06
+**Aktuelle Phase**: Stabilisierungs-Gate für den Release Candidate bestanden (Branch-Review und Integration ausstehend)
+**Produktumfang**: Phase 1–4 + Phase 4+ abgeschlossen; Übergang zu Branch-Review und Pilotvorbereitung
+**Versionsziel**: v3.0 (Release mit vollem Funktionsumfang)
 
 ---
 
-## 总览
+## Überblick
 
 ```
 Phase 1 (M1-M4)          Phase 2 (M5-M8)          Phase 3 (M9-M12)         Phase 4 (M13-M16)
-基础平台 + 核心模块        供应商/客户质量           AI + 知识图谱增强         高级分析 + 生态集成
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Basisplattform + Kern     Lieferanten-/Kunden-      KI + Wissensgraph         Erweiterte Analytik +
+module                    qualität                                            Integration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ██████████████████████████ █████████████████████████ █████████████████████████ █████████████████████████
-      已完成                  已完成                      已完成                    已完成
+    abgeschlossen              abgeschlossen              abgeschlossen              abgeschlossen
 ```
 
 ---
 
-## Phase 1: 基础平台 + 核心模块 (Month 1-4)
+## Phase 1: Basisplattform + Kernmodule (Monat 1–4)
 
-### MVP (M1-M2): 核心闭环 ✅ 已完成
+### MVP (M1–M2): geschlossener Kernkreislauf ✅ abgeschlossen
 
-| 功能 | 优先级 | 状态 | 说明 |
+| Funktion | Priorität | Status | Beschreibung |
 |------|--------|------|------|
-| Docker Compose 开发环境 | P0 | ✅ 完成 | PostgreSQL + Redis + 前后端容器化 |
-| 用户认证 (JWT + RBAC) | P0 | ✅ 完成 | 登录/注册/角色权限（admin/engineer/viewer） |
-| 产品线数据架构 | P0 | ✅ 完成 | JSONB 图结构存储，单产品线 DC-DC-100 |
-| PFMEA 编辑器 | P0 | ✅ 完成 | 工序流面板 + 节点/边表格编辑 + RPN 计算 + 状态流转 |
-| 8D/CAPA 工作流 | P0 | ✅ 完成 | D1-D8 步骤推进 + 阶段表单 + FMEA 关联 |
-| 仪表盘 | P0 | ✅ 完成 | 7 个 KPI 卡片 + 数据概览表 |
-| 基础审计日志 | P0 | ✅ 完成 | AuditLog 模型已建表 |
+| Docker-Compose-Entwicklungsumgebung | P0 | ✅ fertig | PostgreSQL + Redis + containerisiertes Front-/Backend |
+| Authentifizierung (JWT + RBAC) | P0 | ✅ fertig | Anmeldung/Registrierung/Rollenrechte (admin/engineer/viewer) |
+| Datenarchitektur Produktlinie | P0 | ✅ fertig | JSONB-Graphspeicherung, eine Produktlinie DC-DC-100 |
+| PFMEA-Editor | P0 | ✅ fertig | Prozessablauf-Panel + Tabellenbearbeitung von Knoten/Kanten + RPN-Berechnung + Statusübergänge |
+| 8D/CAPA-Workflow | P0 | ✅ fertig | D1–D8-Schritte + Phasenformulare + FMEA-Verknüpfung |
+| Dashboard | P0 | ✅ fertig | 7 KPI-Karten + Datenübersicht |
+| Basis-Audit-Log | P0 | ✅ fertig | Tabelle für das AuditLog-Modell |
 
-### MVP 缺陷修复与体验优化 ✅ 已完成 (2026-05)
+### MVP-Fehlerbehebung und Bedienoptimierung ✅ abgeschlossen (2026-05)
 
-| 功能 | 优先级 | 状态 | 说明 |
+| Funktion | Priorität | Status | Beschreibung |
 |------|--------|------|------|
-| 业务级 RBAC 控制限制 | P0 | ✅ 完成 | 仅限 Admin / Manager 批准 FMEA/CAPA，只读用户界面置灰 |
-| 输入框高频写库防抖 | P0 | ✅ 完成 | 8D/FMEA 文本输入防抖与失焦保存，消除并发写库竞态 |
-| 8D D1 团队组建表单化 | P1 | ✅ 完成 | 替代 JSON TextArea 文本域，提供表格动态增删团队人员 |
-| 审计日志自动写入 | P1 | ✅ 完成 | FMEA 与 CAPA 增删改、状态流转自动生成真实 AuditLog 记录 |
+| Fachliche RBAC-Einschränkungen | P0 | ✅ fertig | Nur Admin/Manager geben FMEA/CAPA frei, Oberfläche für Nur-Lese-Benutzer ausgegraut |
+| Entprellung häufiger Schreibzugriffe | P0 | ✅ fertig | Entprellung und Speichern beim Fokusverlust für 8D-/FMEA-Texteingaben, keine konkurrierenden Schreibzugriffe |
+| Formular für das 8D-Team (D1) | P1 | ✅ fertig | Tabelle mit dynamischem Hinzufügen/Entfernen statt JSON-Textfeld |
+| Automatisches Audit-Log | P1 | ✅ fertig | Anlegen/Ändern/Löschen und Statusübergänge von FMEA und CAPA erzeugen echte AuditLog-Einträge |
 
-### M3-M4: 核心扩展 🔲 待开发
+### M3–M4: Kernerweiterungen ✅ abgeschlossen
 
-| 功能 | 优先级 | 状态 | 说明 |
+| Funktion | Priorität | Status | Beschreibung |
 |------|--------|------|------|
-| DFMEA 编辑器 | P0 | ✅ 完成 | 系统→子系统→零部件展开 + 设计参数矩阵 |
-| DFMEA 生成规则引擎 | P0 | ✅ 完成 | 基于 AIAG-VDA 七步法设计引导式规则：①范围定义(5T)→②结构分析(方块图/边界图/结构树)→③功能分析(功能树/参数图)→④失效分析(失效链 FE-FM-FC)→⑤风险分析(S/O/D+AP)→⑥优化(预防/探测措施)→⑦结果文件化。核心规则：结构层级自动推导下级功能、功能否定生成失效模式、失效链自动关联、AP 表自动判定 H/M/L 并提示优化方向
-| 控制计划编辑器 + FMEA 联动 | P0 | ✅ 完成 | PFMEA 一键生成控制计划，双向同步 |
-| SPC 控制图 (v1.0+v1.1) | P0 | ✅ 完成 | X-bar R / I-MR / 直方图 / P/NP/C/U / 8大判异规则 / 手动+批量+API三源录入 / 过程能力Cp/Cpk/Pp/Ppk / 异常分级预警→8D / 控制限多版本管理 |
-| SPC 计数值控制图 (v1.1) | P1 | ✅ 完成 | P图 / NP图 / C图 / U图 |
-| SPC 控制限多版本 (v1.1) | P1 | ✅ 完成 | 自动版本号 + Drawer 切换 |
-| 特殊特性贯穿管理 | P0 | ✅ 完成 | CC/SC 标识 + FMEA→CP 联动 + 覆盖矩阵 + 手动创建 + 严重度预警 + MSA 回调 + 动态产品线 |
-| 产品安全特性管理 | P0 | ✅ 完成 | 安全特性识别 + 特殊批准流程 + FMEA 自动建议 + 会签通知 + 审批状态机 + 仪表盘 KPI |
-| 质量目标管理 | P1 | ✅ 完成 | 三级目标树（公司→产品线→过程）+ 审批流 + 仪表盘 |
-| 内部审核管理 | P0 | ✅ 完成 | 体系审核/过程审核/产品审核 + 检查表 + 发现项 + CAPA联动 |
-| FMEA/CP 版本管理 | P1 | ✅ 完成 | 版本历史 + 变更对比 + 差异高亮 |
-| 管理评审模块 | P1 | ✅ 完成 | ISO 9001 §9.3 管理评审数据包自动汇总 + 措施跟踪闭环(含效果验证) + 手动输入项 |
-| MSA 测量系统分析 | P1 | ✅ 完成 | 量具管理与校验 + GR&R (均值极差法) + 偏倚 + 线性 + 稳定性 + 计数型 (Kappa) 分析，包含计算引擎、API 与可视化界面，完整测试覆盖 |
+| DFMEA-Editor | P0 | ✅ fertig | Aufgliederung System→Subsystem→Bauteil + Matrix der Konstruktionsparameter |
+| DFMEA-Regel-Engine | P0 | ✅ fertig | Geführte Regeln nach den 7 Schritten AIAG-VDA: ① Umfang (5T) → ② Strukturanalyse (Blockdiagramm/Grenzdiagramm/Strukturbaum) → ③ Funktionsanalyse (Funktionsbaum/P-Diagramm) → ④ Fehleranalyse (Fehlerkette FE-FM-FC) → ⑤ Risikoanalyse (S/O/D + AP) → ⑥ Optimierung (Vermeidungs-/Entdeckungsmaßnahmen) → ⑦ Dokumentation. Kernregeln: Ableitung untergeordneter Funktionen aus der Strukturebene, Fehlerarten durch Negation von Funktionen, automatische Verknüpfung der Fehlerkette, AP-Tabelle bestimmt H/M/L und schlägt Optimierungsrichtungen vor |
+| Produktionslenkungsplan-Editor + FMEA-Kopplung | P0 | ✅ fertig | Produktionslenkungsplan per Klick aus der PFMEA, bidirektionale Synchronisation |
+| SPC-Regelkarten (v1.0+v1.1) | P0 | ✅ fertig | X-quer-R / I-MR / Histogramm / P/NP/C/U / 8 Auffälligkeitsregeln / Eingabe manuell, als Stapel oder per API / Prozessfähigkeit Cp/Cpk/Pp/Ppk / gestufte Warnungen → 8D / mehrere Versionen der Eingriffsgrenzen |
+| SPC-Regelkarten für attributive Merkmale (v1.1) | P1 | ✅ fertig | P-, NP-, C-, U-Karte |
+| Versionen der Eingriffsgrenzen (v1.1) | P1 | ✅ fertig | Automatische Versionsnummer + Umschaltung per Drawer |
+| Durchgängige Verwaltung besonderer Merkmale | P0 | ✅ fertig | CC/SC-Kennzeichen + FMEA→CP-Kopplung + Abdeckungsmatrix + manuelles Anlegen + Warnung nach Bedeutung + MSA-Rückmeldung + dynamische Produktlinie |
+| Verwaltung von Produktsicherheitsmerkmalen | P0 | ✅ fertig | Erkennung von Sicherheitsmerkmalen + besonderer Freigabeprozess + automatische FMEA-Vorschläge + Mitzeichnungsbenachrichtigung + Freigabe-Zustandsautomat + Dashboard-KPI |
+| Qualitätsziele | P1 | ✅ fertig | Dreistufiger Zielbaum (Unternehmen→Produktlinie→Prozess) + Freigabeablauf + Dashboard |
+| Interne Audits | P0 | ✅ fertig | System-/Prozess-/Produktaudit + Checklisten + Feststellungen + CAPA-Kopplung |
+| FMEA/CP-Versionsverwaltung | P1 | ✅ fertig | Versionshistorie + Änderungsvergleich + hervorgehobene Unterschiede |
+| Managementbewertung | P1 | ✅ fertig | Automatisch zusammengestelltes Datenpaket nach ISO 9001 §9.3 + Maßnahmenverfolgung (inkl. Wirksamkeitsprüfung) + manuelle Eingaben |
+| MSA – Messsystemanalyse | P1 | ✅ fertig | Prüfmittelverwaltung und Kalibrierung + GR&R (Mittelwert-Spannweiten-Methode) + Bias + Linearität + Stabilität + attributive Analyse (Kappa), mit Rechenkern, API und Visualisierung, vollständig getestet |
 
-**验收标准**: 所有核心模块上线，内部 Beta 可用
+**Abnahmekriterium**: Alle Kernmodule live, interne Beta nutzbar
 
 ---
 
-## Phase 2: 供应商/客户质量 (Month 5-8) ✅ 基本完成
+## Phase 2: Lieferanten-/Kundenqualität (Monat 5–8) ✅ im Wesentlichen abgeschlossen
 
-| 功能 | 优先级 | 状态 | 说明 |
+| Funktion | Priorität | Status | Beschreibung |
 |------|--------|------|------|
-| 供应商档案管理 | P0 | ✅ 完成 | 供应商主数据 + 资质证书 + 批准状态 + 准入审批流 + 绩效评价（混合指标 + A/B/C/D评级）；扩展点：Phase 2 IQC 阶段追加 supplier_audit_links 多对多关联表支持多次复审历史 |
-| IQC 来料检验 | P0 | ✅ 完成 | AQL 抽样方案 + 检验批管理 + 判定 (基于 ISO 2859-1 的 AQL 抽样引擎，支持克隆重检与检验明细) |
-| 供货质量看板 | P0 | ✅ 完成 | 供应商 PPM / 批次合格率 / 交付准时率 / 评级分布 / 供应商排名 / 对比分析 / Excel 导出 |
-| SCAR 管理 + 8D 关联 | P1 | ✅ 完成 | IQC 拒收触发 SCAR → 8D 闭环；5态生命周期 + 独立路由 + 列表/详情页 |
-| 客诉管理 | P0 | ✅ 完成 | 客诉接单 + 分类/严重等级 + 批次追溯 + 处理人 + 附件元数据 + 超期预警 + CAPA/FMEA 联动；SCAR 接口预留 |
-| RMA 退货管理 | P0 | ✅ 完成 | 退货登记 + 批次/序列号 + 物流单号 + 不良分析 + 责任判定 + CAPA/FMEA 联动；SCAR 接口预留 |
-| 客户质量看板 | P0 | ✅ 完成 | 投诉数、退货量、风险灯号、PPM 估算；0 公里 PPM（发运记录表）、SPC CPK、保修费用、客户满意度、客户审核摘要 |
-| 供应商审核与绩效评价 | P1 | ✅ 合并至供应商档案管理 | 已整合进供应商管理模块 |
-| 客户审核管理 | P1 | ✅ 完成 | 审核日程 + 发现项追踪 + 整改闭环（复用 audit_plan/audit_finding 路由，前端列表/详情页 + 客户确认流程） |
-| 批量导入/导出 (Excel) | P2 | ✅ 完成 | xls/xlsx 标准格式兼容（backend utils/excel.py 通用工具 + frontend ImportExcelDialog 组件，已应用于供应商/SPC/IQC 模块） |
-| APQP 项目质量策划 | P1 | ✅ 完成 | 五阶段门管理 + 五大工具串联 + 甘特图 + 阶段交付物检查表 |
-| PPAP 管理 | P1 | ✅ 完成 | AIAG 18 要素提交与审批，5 态生命周期（draft/under_review/approved/rejected/resubmit），Level 1-5 必填元素映射，元素状态流转，前端列表/详情页 |
-| 产品线选择器 | P0 | ✅ 完成 | product_lines 表 + 全局选择器 + 所有模块统一过滤 + service 层校验 |
-| SCAR 接入 scar_ref_id | P1 | ✅ 完成 | 供应商责任客诉/RMA 一键创建 SCAR，双向关联，savepoint 事务安全 |
-| 0 公里 PPM 发运记录 | P1 | ✅ 完成 | shipment_records 表 + CRUD + PPM fallback 链（参数→发运记录SUM→年发运量） |
-| CSR/VOC → 控制计划同步 | P1 | ✅ 完成 | 客户特殊要求一键同步到控制计划 customer_requirements 字段，保留手动条目 |
-| 高级客户质量看板 | P2 | ✅ 完成 | SPC CPK/PPK、保修费用、客户满意度、客户审核摘要；按客户/产品线过滤 |
+| Lieferantenstammdaten | P0 | ✅ fertig | Stammdaten + Zertifikate + Freigabestatus + Zulassungsablauf + Leistungsbewertung (gemischte Kennzahlen + Einstufung A/B/C/D); Erweiterungspunkt: Phase-2-IQC ergänzt die n:m-Tabelle supplier_audit_links für mehrfache Wiederholungsaudits |
+| Wareneingangsprüfung (IQC) | P0 | ✅ fertig | AQL-Stichprobenpläne + Prüflosverwaltung + Entscheid (AQL-Engine nach ISO 2859-1, mit Klonen zur Wiederholungsprüfung und Prüfdetails) |
+| Dashboard Lieferqualität | P0 | ✅ fertig | Lieferanten-PPM / Losannahmequote / Liefertreue / Verteilung der Einstufung / Lieferantenranking / Vergleich / Excel-Export |
+| SCAR + 8D-Kopplung | P1 | ✅ fertig | IQC-Rückweisung löst SCAR → geschlossenen 8D-Kreislauf aus; Lebenszyklus mit 5 Status + eigene Routen + Listen-/Detailseiten |
+| Reklamationsmanagement | P0 | ✅ fertig | Erfassung + Klassifizierung/Schwere + Chargenrückverfolgung + Bearbeiter + Anhangsmetadaten + Überfälligkeitswarnung + CAPA/FMEA-Kopplung; SCAR-Schnittstelle vorbereitet |
+| RMA – Rücksendungen | P0 | ✅ fertig | Rücksendeerfassung + Charge/Seriennummer + Sendungsnummer + Fehleranalyse + Verantwortungszuordnung + CAPA/FMEA-Kopplung; SCAR-Schnittstelle vorbereitet |
+| Dashboard Kundenqualität | P0 | ✅ fertig | Reklamationen, Rücksendungen, Risikoampel, PPM-Schätzung; 0-km-PPM (Versandtabelle), SPC-CPK, Gewährleistungskosten, Kundenzufriedenheit, Zusammenfassung Kundenaudits |
+| Lieferantenaudits und Leistungsbewertung | P1 | ✅ in Lieferantenstammdaten integriert | Teil des Lieferantenmoduls |
+| Kundenaudits | P1 | ✅ fertig | Auditplanung + Verfolgung von Feststellungen + Abschluss der Korrekturen (nutzt die Routen audit_plan/audit_finding, Listen-/Detailseiten + Kundenbestätigung) |
+| Massenimport/-export (Excel) | P2 | ✅ fertig | Kompatibel mit xls/xlsx (gemeinsames Werkzeug backend utils/excel.py + Frontend-Komponente ImportExcelDialog, eingesetzt bei Lieferanten/SPC/IQC) |
+| APQP – Qualitätsvorausplanung | P1 | ✅ fertig | Fünf Phasen-Gates + Verkettung der Core Tools + Gantt-Diagramm + Checklisten der Phasenergebnisse |
+| PPAP-Verwaltung | P1 | ✅ fertig | Einreichung und Freigabe der 18 AIAG-Elemente, Lebenszyklus mit 5 Status (draft/under_review/approved/rejected/resubmit), Pflichtelemente je Level 1–5, Statusübergänge pro Element, Listen-/Detailseiten |
+| Produktlinienauswahl | P0 | ✅ fertig | Tabelle product_lines + globale Auswahl + einheitlicher Filter in allen Modulen + Prüfung in der Service-Schicht |
+| SCAR über scar_ref_id | P1 | ✅ fertig | SCAR per Klick aus lieferantenverschuldeten Reklamationen/RMAs, bidirektionale Verknüpfung, transaktionssicher per savepoint |
+| Versanddaten für 0-km-PPM | P1 | ✅ fertig | Tabelle shipment_records + CRUD + PPM-Fallback-Kette (Parameter → Summe der Versanddaten → Jahresversandmenge) |
+| CSR/VOC → Produktionslenkungsplan | P1 | ✅ fertig | Kundenspezifische Anforderungen per Klick in das Feld customer_requirements des Produktionslenkungsplans, manuelle Einträge bleiben erhalten |
+| Erweitertes Dashboard Kundenqualität | P2 | ✅ fertig | SPC-CPK/PPK, Gewährleistungskosten, Kundenzufriedenheit, Zusammenfassung Kundenaudits; Filter nach Kunde/Produktlinie |
 
-**客户质量增强 (2026-05-30 已完成)**:
-1. ~~SCAR 管理接入 `scar_ref_id`~~ ✅ 供应商责任客诉/RMA 一键创建 SCAR
-2. ~~客户审核管理~~ ✅ 已在 Phase 2 前期完成
-3. ~~CSR/VOC 同步控制计划~~ ✅ 一键同步客户特殊要求到控制计划
-4. ~~0 公里 PPM 发运记录~~ ✅ shipment_records 表 + PPM fallback 链
-5. ~~高级客户质量看板~~ ✅ SPC CPK、保修、满意度、审核摘要
+**Dunkles Industrie-Dashboard (abgeschlossen 2026-06-01)**: ConfigProvider mit darkAlgorithm und eigenen Tokens (eine Quelle), neu geschriebenes Dashboard (KPI-Statusmatrix, offene Punkte, letzte Aktionen mit relativer Zeit, Schnellzugriffe – für viewer ausgeblendet), responsives Einklappen auf kleinen Bildschirmen, ARIA-Landmarken, Tastaturnavigation, prefers-reduced-motion, Kontrast nach WCAG AA; AppLayout ohne hartcodierte Farben.
 
-**深色工业仪表盘 (2026-06-01 已完成)**:
-1. ~~ConfigProvider 暗色主题~~ ✅ darkAlgorithm + 自定义 Token（单一来源）
-2. ~~仪表盘重写~~ ✅ KPI 卡片（状态矩阵）+ 待处置事项（行动词）+ 最近操作（相对时间）+ 快速入口（viewer 隐藏）
-3. ~~响应式设计~~ ✅ 小屏 P2/P3 自动折叠 + ARIA 地标 + 键盘导航（Enter + Space）
-4. ~~可访问性~~ ✅ prefers-reduced-motion 响应 + 对比度 WCAG AA + screen reader 支持
-5. ~~AppLayout 清理~~ ✅ 移除硬编码颜色，依赖 ConfigProvider Token
-
-**验收标准**: GA v1.0 发布 — 供应商/客户模块上线
+**Abnahmekriterium**: Release GA v1.0 – Lieferanten-/Kundenmodule live
 
 ---
 
-## Phase 3: AI + 知识图谱增强 (Month 9-12) ✅ 已完成
+## Phase 3: KI + Wissensgraph (Monat 9–12) ✅ abgeschlossen
 
-| 功能 | 优先级 | 状态 | 说明 |
+| Funktion | Priorität | Status | Beschreibung |
 |------|--------|------|------|
-| Neo4j 知识图谱基础设施 | P1 | ✅ 完成 | Neo4j Docker 服务 + Repository 抽象（Neo4j/JSONB 双实现）+ API 路由 |
-| 知识图谱可视化 (G6 v5) | P1 | ✅ 完成 | FMEA 嵌入"图谱" tab（力导向/层次布局 + 节点点击/双击/右键菜单 + 影响/原因追溯高亮）+ 独立全局页面 `/knowledge-graph`（风险地图 + 跨 FMEA 统计 + 历史关键词搜索 + 节点跳转联动） |
-| 全局知识库 | P1 | ✅ 完成 | 跨 FMEA 节点统计（AP 分布 / 高 AP 节点 / 平均 RPN / Top 失效模式）+ 相似节点关键词搜索 + Pydantic 响应白名单脱敏 + `/knowledge-graph` 全局页面 |
-| LLM RAG 语义搜索 | P2 | ✅ 完成 | pgvector 向量存储 + 混合搜索（向量余弦 + tsvector 全文）+ RRF 融合 + RAG 问答（LLM + 来源引用）+ 6 实体类型覆盖（FMEA/CAPA/审核/客诉/SCAR/RMA）+ 产品线隔离 + 模块权限预过滤 + 异步 embedding worker + 回填命令 + KnowledgeGraph 第三 Tab |
-| FMEA 编辑时智能推荐 | P2 | ✅ 完成 | 混合推荐系统（规则引擎 + 知识图谱相似度匹配 + 可选 LLM）+ PostgreSQL 缓存 + 前端 SmartSuggestionDropdown 内联下拉（5 种触发类型 × 6 列自动触发 + 500ms 防抖 + 键盘导航 + 回退提示）+ 产品线访问控制 + 限流；LLM 支持 Claude/OpenAI/Local 多提供商可配置 + 来源文档标注 |
-| 8D 根因+措施推荐 | P2 | ✅ 完成 | D4/D5 全混合推荐管道（HybridRecommendationPipeline）：D4 四源（FMEA 图匹配 + RAG 语义搜索 + 历史 CAPA 匹配 + 规则引擎），D5 三源 + 控制措施扩展器；FusionEngine 去重排序 + LLMFusionLayer 增强；推荐面板（采纳/跳过）+ 只读权限控制 |
-| 变更影响分析（图遍历）| P2 | ✅ 完成 | 设计参数变更 → 自动追溯影响范围；Neo4j/JSONB 双实现 BFS + AP 预测 + 影响评分 + 审计日志 + 前端报告/图谱联动 |
-| SPC-FMEA 异常关联推荐 | P2 | ✅ 完成 | 控制图异常 → 识别关联 FMEA → 推荐 8D 方案；双路径匹配（控制计划桥接 + 名称模糊匹配）+ enrichment（RPN/AP/path/cause/control_count）+ 推荐弹窗面板 + CAPA 自动关联 |
-| D7 预防复发提示 | P2 | ✅ 完成 | D7 步骤自动推荐关联 FMEA 失效模式（图结构匹配 + 关键词搜索）+ 一键跳转 + D5 措施自动填充 + D8 推进软门禁（未确认项弹窗 + 跳过理由写入审计日志）；产品线隔离 + CAPA/FMEA 双权限校验 |
-| 多人协同编辑 | P2 | ✅ 完成 | 乐观锁 + 短轮询在线状态：FMEA/Control Plan 顶部在线用户列表 + 行级编辑指示器 + 409 冲突检测 + 三方 diff 预览 + 安全覆盖保存；CAPA/APQP 等仅接入在线状态 |
+| Neo4j-Infrastruktur für den Wissensgraphen | P1 | ✅ fertig | Neo4j-Docker-Dienst + Repository-Abstraktion (Neo4j/JSONB) + API-Routen |
+| Visualisierung des Wissensgraphen (G6 v5) | P1 | ✅ fertig | Reiter „Graph“ in der FMEA (Kräfte-/Hierarchie-Layout, Klick/Doppelklick/Kontextmenü, Hervorhebung von Auswirkungs-/Ursachenpfaden) + globale Seite `/knowledge-graph` (Risikokarte, FMEA-übergreifende Statistik, Stichwortsuche, Sprung zu Knoten) |
+| Globale Wissensbasis | P1 | ✅ fertig | FMEA-übergreifende Knotenstatistik (AP-Verteilung, Knoten mit hohem AP, mittlere RPN, Top-Fehlerarten) + Stichwortsuche nach ähnlichen Knoten + Schwärzung per Pydantic-Antwort-Whitelist |
+| LLM-RAG-Semantiksuche | P2 | ✅ fertig | pgvector + hybride Suche (Vektor-Kosinus + tsvector-Volltext) + RRF-Fusion + RAG-Fragen mit Quellenangaben + 6 Entitätstypen (FMEA/CAPA/Audit/Reklamation/SCAR/RMA) + Produktlinientrennung + Vorfilter nach Modulrechten + asynchroner Embedding-Worker + Nachfüllbefehl |
+| Intelligente Empfehlungen im FMEA-Editor | P2 | ✅ fertig | Hybrides Empfehlungssystem (Regel-Engine + Ähnlichkeit im Wissensgraphen + optionales LLM) + PostgreSQL-Cache + Inline-Dropdown SmartSuggestionDropdown (5 Auslöser × 6 Spalten, 500 ms Entprellung, Tastaturnavigation, Rückfallhinweis) + Produktlinien-Zugriffskontrolle + Rate-Limit; mehrere LLM-Anbieter (Claude/OpenAI/lokal) + Quellenkennzeichnung |
+| 8D-Empfehlungen für Grundursachen und Maßnahmen | P2 | ✅ fertig | Hybride Pipeline D4/D5 (HybridRecommendationPipeline): D4 mit vier Quellen (FMEA-Graphabgleich + RAG-Semantiksuche + historische CAPA + Regel-Engine), D5 mit drei Quellen + Erweiterung um Lenkungsmaßnahmen; FusionEngine dedupliziert/sortiert, LLMFusionLayer verfeinert; Empfehlungspanel (übernehmen/überspringen) + Nur-Lese-Rechte |
+| Änderungsauswirkungsanalyse (Graphtraversierung) | P2 | ✅ fertig | Änderung von Konstruktionsparametern → automatische Ermittlung des Auswirkungsbereichs; BFS auf Neo4j/JSONB + AP-Prognose + Auswirkungsbewertung + Audit-Log + Bericht/Graph im Frontend |
+| SPC-FMEA-Empfehlungen bei Auffälligkeiten | P2 | ✅ fertig | Auffälligkeit in der Regelkarte → zugehörige FMEA → 8D-Vorschlag; zwei Abgleichpfade (über Produktionslenkungsplan + unscharfer Namensabgleich) + Anreicherung (RPN/AP/Pfad/Ursache/Anzahl Maßnahmen) + Empfehlungsdialog + automatische CAPA-Verknüpfung |
+| D7-Hinweise zur Wiederholungsvermeidung | P2 | ✅ fertig | D7 schlägt verknüpfte FMEA-Fehlerarten vor (Graphabgleich + Stichwortsuche) + Sprung per Klick + automatisches Übernehmen von D5-Maßnahmen + weiches Gate vor D8 (Dialog für unbestätigte Punkte, Überspringgrund im Audit-Log); Produktlinientrennung + doppelte CAPA/FMEA-Rechteprüfung |
+| Gemeinsames Bearbeiten | P2 | ✅ fertig | Optimistische Sperre + kurzes Polling der Anwesenheit: Liste der anwesenden Benutzer in FMEA/Produktionslenkungsplan + Bearbeitungsanzeige je Zeile + 409-Konflikterkennung + Drei-Wege-Diff + sicheres Überschreiben; CAPA/APQP usw. nur mit Anwesenheitsanzeige |
 
-**Phase 3 已完成 (2026-05-31)**:
-1. ~~Neo4j 知识图谱基础设施~~ ✅ Docker Compose + Neo4jRepository/JSONBRepository 双实现
-2. ~~知识图谱可视化 (G6 v5)~~ ✅ GraphCanvas + GraphToolbar + NodeDetailDrawer + FMEA 嵌入 tab + /knowledge-graph 全局页
-3. ~~全局知识库（基础）~~ ✅ 跨 FMEA 统计 + 相似节点搜索
+Ergänzt bis 2026-06-03: Anbindung der FMEA-Empfehlungen an die Ähnlichkeit im Wissensgraphen samt Quellenkennzeichnung, Ausbau der D4/D5-Pipeline (historische CAPA, LLM-Verfeinerung, RAG statt Teilzeichenkettenabgleich) und Schwärzung der globalen Wissensbasis bei produktlinienübergreifender Aggregation.
 
-**Phase 3 已完成 (2026-06-01)**:
-4. ~~D7 预防复发提示~~ ✅ 图结构匹配 + 关键词搜索 + 自动填充 + 软门禁 + 审计日志
-5. ~~FMEA 智能推荐升级~~ ✅ 后端混合推荐系统 + PostgreSQL 缓存 + 前端 SmartSuggestionDropdown 内联下拉 + 多 LLM 提供商支持
-
-**Phase 3 已完成 (2026-06-02)**:
-6. ~~8D 根因+措施推荐~~ ✅ D4 根因推荐（3 策略匹配）+ D5 措施推荐（3 路径控制措施 + 通用建议）+ 推荐面板 + 权限控制
-7. ~~LLM RAG 语义搜索~~ ✅ pgvector + 混合搜索（向量+全文）+ RRF 融合 + RAG 问答 + 6 实体类型 + 产品线隔离 + 权限预过滤 + 异步 Worker + 回填命令 + 前端语义搜索 Tab + 17 个单元测试
-8. ~~变更影响分析（图遍历）~~ ✅ Neo4j/JSONB 双 Repository BFS 遍历 + 方向控制 + AP 预测 + 影响评分 + 审计日志 + 产品线权限 + 前端报告面板 + FMEA 编辑器集成 + 知识图谱联动
-9. ~~多人协同编辑~~ ✅ 乐观锁 + 短轮询在线状态（15s/8s/30s 动态间隔）
-   - 后端：collaboration_sessions 表 + 心跳 API + lifespan 清理协程 + FMEA/Control Plan 原子乐观锁（SELECT FOR UPDATE + populate_existing）
-   - 前端：useCollaboration Hook + CollaborationBar + ActiveUserIndicator + ConflictResolutionModal + 三方 graph diff + Control Plan items diff
-   - 覆盖：FMEA/Control Plan 完整协同（在线状态 + 冲突提示），CAPA/APQP 等仅在线状态
-
-**验收标准**: GA v2.0 发布 — AI + 知识图谱上线
+**Abnahmekriterium**: Release GA v2.0 – KI + Wissensgraph live
 
 ---
 
-## Phase 4: 高级分析 + 生态集成 (Month 13-16) ✅ 已完成
+## Phase 4: Erweiterte Analytik + Integration (Monat 13–16) ✅ abgeschlossen
 
-| 功能 | 优先级 | 状态 | 说明 |
+| Funktion | Priorität | Status | Beschreibung |
 |------|--------|------|------|
-| MES 集成连接器 | P2 | ✅ 完成 | Mock + REST 双连接器；9 张数据表；Outbox 可靠推送；3 类数据接入（生产订单/设备状态/报废记录）；SPC 告警推送；API Key 认证；凭证加密；4 页前端；Dashboard 实时聚合；产品线隔离；并发测试 33 条 |
-| PLM 集成连接器 | P2 | ✅ 完成 (2026-06-09) | PLM BOM 树查询/导入 FMEA + Part→SC 特殊特性确认；Mock 连接器；9 张 PLM 表；前端 4 页（Dashboard/Connections/Parts/ChangeOrders）；双权限校验；46 后端回归测试 + 11 前端权限测试 |
-| ERP 集成连接器 | P2 | ✅ 完成 (2026-06-11) | 商务与供应链事实源集成；9+1 同步对象；12 张数据表；Mock + REST 连接器；4 阶段 DAG 同步；双写关联（suppliers/shipments）；COQ 四类成本；字段级脱敏；双向批次追溯；6 页前端；30 测试全绿；config 统一脱敏；产品线更新前校验；测试契约对齐 |
-| 8D 报告 AI 草拟 | P3 | ✅ 完成 | LLM 辅助填充 D2-D8 步骤；结构化/段落双格式；localStorage 格式偏好；预览确认（替换/追加/取消）；撤销；权限控制（仅当前步骤可草拟）；独立审计日志；限流；FMEA 上下文关联；产品线隔离 |
-| 质量趋势 AI 解读 | P3 | ✅ 完成 | 自定义仪表盘 Widget：规则摘要 + 按需 LLM 深度解读；SPC/CAPA/FMEA 三源聚合；模块级权限过滤；证据 hash 缓存；限流 + 审计日志；前端 stale 检测 |
-| 经验教训智能推送 | P3 | ✅ 完成 (2026-06-10) | 5 源适配器（FMEA 关键词 + CAPA 语义 + 审核发现 + 语义搜索 + 规则引擎）+ 融合排序 + 权限隔离缓存 + 前端 Modal 推送；14 单元测试 |
-| 控制计划智能校验 | P3 | ✅ 完成 (2026-06-11) | 规则引擎校验（4 规则：控制方法/反应计划缺失、FMEA 一致性、特殊特性覆盖）+ 两表模型（findings 稳定身份 + occurrences 快照）+ 批量汇总 API + 前端校验面板/徽章 + 自动触发 + 30 测试 |
-| IQC 抽样方案智能优化 | P3 | ✅ 完成 | 基于历史质量动态调整 AQL；组合规则引擎（10 条规则）+ 多级审批（engineer/manager）+ 质量画像 + PPM/SCAR/安全缺陷触发；4 张新表 + 配置化参数；4 页前端；18 条单元测试 |
-| 供应商风险智能预警 | P3 | ✅ 完成 (2026-06-11) | 10 规则引擎（质量/交付/合规）+ 加权评分 + 4 级风险（低/中/高/严重）+ 批量评估 + 每日定时触发 + IQC 判决增量触发 + SCAR/CAPA 闭环（一键创建 + 关闭联动）+ 邮件/钉钉 Webhook 通知（SSRF 保护 + Fernet 加密）+ 风险矩阵散点图 + 规则配置页 + 通知渠道管理 + 45 测试全绿 |
-| 管理评审报告自动生成 | P3 | ✅ 完成 (2026-06-12) | 汇总输入数据 → 生成报告初稿，支持 AI 生成、人工编辑、定稿归档与版本历史 |
-| 供应链风险地图 | P3 | ✅ 完成 (2026-06-12) | 多维度供应风险热力图 + 产品线隔离 + 环比差异 + 供应商详情/对比 + 6 月趋势 + 定时快照(pg_try_advisory_lock) + CSV/Excel 导出 + 830 测试 |
-| 自定义看板（拖拽式）| P3 | ✅ 完成 | react-grid-layout 拖拽布局，widget 库面板（18 种 widget），用户级 layout 存储，产品线过滤，权限控制 |
-| 多工厂部署支持 | P3 | ✅ 完成 (2026-06-12) | 单数据库 + factory_id 行级隔离 + 三层 Scope 模型 + 集团汇总 |
-| SaaS 多租户架构 | P3 | ✅ 完成 (2026-06-13) | Schema-per-tenant 隔离 + 平台/租户双 Base + JWT 域隔离 + 租户配置 API |
+| MES-Konnektor | P2 | ✅ fertig | Mock- und REST-Konnektor; 9 Tabellen; zuverlässiges Senden per Outbox; 3 Datenarten (Fertigungsaufträge/Anlagenstatus/Ausschuss); SPC-Alarme; API-Key-Authentifizierung; verschlüsselte Zugangsdaten; 4 Frontend-Seiten; Echtzeit-Aggregation im Dashboard; Produktlinientrennung; 33 Nebenläufigkeitstests |
+| PLM-Konnektor | P2 | ✅ fertig (2026-06-09) | Abfrage des PLM-Stücklistenbaums/Import in die FMEA + Bestätigung besonderer Merkmale Part→SC; Mock-Konnektor; 9 PLM-Tabellen; 4 Frontend-Seiten (Dashboard/Connections/Parts/ChangeOrders); doppelte Rechteprüfung; 46 Backend-Regressionstests + 11 Frontend-Rechtetests |
+| ERP-Konnektor | P2 | ✅ fertig (2026-06-11) | Integration der Geschäfts- und Lieferkettendaten; 9+1 Synchronisationsobjekte; 12 Tabellen; Mock- und REST-Konnektor; DAG-Synchronisation in 4 Phasen; doppelte Verknüpfung (suppliers/shipments); vier Kostenarten der COQ; Schwärzung auf Feldebene; bidirektionale Chargenrückverfolgung; 6 Frontend-Seiten; 30 Tests grün |
+| KI-Entwurf für 8D-Berichte | P3 | ✅ fertig | LLM-gestütztes Ausfüllen von D2–D8; strukturiertes oder Fließtextformat; Formatpräferenz in localStorage; Vorschau mit Bestätigung (ersetzen/anhängen/abbrechen); Rückgängig; Rechteprüfung (nur der aktuelle Schritt); eigenes Audit-Log; Rate-Limit; FMEA-Kontext; Produktlinientrennung |
+| KI-Interpretation von Qualitätstrends | P3 | ✅ fertig | Dashboard-Widget: Regelzusammenfassung + LLM-Tiefenanalyse auf Abruf; Aggregation aus SPC/CAPA/FMEA; Filter nach Modulrechten; Cache über Evidenz-Hash; Rate-Limit + Audit-Log; Veraltungserkennung im Frontend |
+| Intelligente Zustellung von Lessons Learned | P3 | ✅ fertig (2026-06-10) | 5 Quelladapter (FMEA-Stichworte, CAPA-Semantik, Auditfeststellungen, Semantiksuche, Regel-Engine) + Fusionsranking + rechtegetrennter Cache + Modal im Frontend; 14 Unit-Tests |
+| Intelligente Prüfung von Produktionslenkungsplänen | P3 | ✅ fertig (2026-06-11) | Regel-Engine mit 4 Regeln (fehlende Lenkungsmethode/Reaktionsplan, FMEA-Konsistenz, Abdeckung besonderer Merkmale) + Zwei-Tabellen-Modell (findings mit stabiler Identität + occurrences als Snapshot) + Sammel-API + Prüfpanel/Badges + automatische Auslösung; 30 Tests |
+| Intelligente Optimierung der IQC-Stichprobenpläne | P3 | ✅ fertig | Dynamische AQL-Anpassung nach Qualitätshistorie; kombinierte Regel-Engine (10 Regeln) + mehrstufige Freigabe (engineer/manager) + Qualitätsprofil + Auslöser PPM/SCAR/Sicherheitsfehler; 4 neue Tabellen + konfigurierbare Parameter; 4 Frontend-Seiten; 18 Unit-Tests |
+| Intelligente Lieferanten-Risikowarnung | P3 | ✅ fertig (2026-06-11) | Regel-Engine mit 10 Regeln (Qualität/Lieferung/Compliance) + gewichtete Bewertung + 4 Risikostufen + Stapelbewertung + tägliche Auslösung + inkrementelle Auslösung durch IQC-Entscheide + geschlossener Kreislauf mit SCAR/CAPA + Benachrichtigung per E-Mail/Webhook (SSRF-Schutz + Fernet-Verschlüsselung) + Risikomatrix + Regelkonfiguration + Kanalverwaltung; 45 Tests grün |
+| Automatischer Bericht zur Managementbewertung | P3 | ✅ fertig (2026-06-12) | Eingangsdaten zusammenfassen → Berichtsentwurf, mit KI-Erzeugung, manueller Bearbeitung, Finalisierung/Archivierung und Versionshistorie |
+| Risikokarte der Lieferkette | P3 | ✅ fertig (2026-06-12) | Mehrdimensionale Heatmap der Lieferrisiken + Produktlinientrennung + Vormonatsvergleich + Lieferantendetail/-vergleich + 6-Monats-Trend + zeitgesteuerte Snapshots (pg_try_advisory_lock) + CSV-/Excel-Export |
+| Eigene Dashboards (Drag & Drop) | P3 | ✅ fertig | Layout per react-grid-layout, Widget-Bibliothek (18 Widgets), Layout je Benutzer gespeichert, Produktlinienfilter, Rechteprüfung |
+| Mehrwerksbetrieb | P3 | ✅ fertig (2026-06-12) | Eine Datenbank + zeilenweise Trennung über factory_id + dreistufiges Scope-Modell + Konzernauswertung |
+| SaaS-Mandantenarchitektur | P3 | ✅ fertig (2026-06-13) | Schema-per-tenant + getrennte Plattform-/Mandanten-Basis + JWT-Domänentrennung + API zur Mandantenanlage |
 
-**Phase 4 MES 集成已完成 (2026-06-05)**:
-1. ~~数据库迁移~~ ✅ 9 张 MES 表 + CHECK 约束 + 权限种子（alembic/030）
-2. ~~ORM 模型~~ ✅ MESConnection / MESSyncJob / MESProductionOrder / MESEquipmentStatus / MESScrapRecord / MESPushOutbox 等 9 个模型
-3. ~~Schema 层~~ ✅ RESTConfig 校验 + Pydantic v2 请求/响应 + 分页包装 + Dashboard 聚合
-4. ~~连接器适配层~~ ✅ MESConnector ABC + MockMESConnector + RESTMESConnector（分页/重试/auth/字段映射）
-5. ~~凭证安全~~ ✅ SHA-256 API Key hash + Fernet 加密出站凭证 + sanitize_config 脱敏
-6. ~~数据接入服务~~ ✅ MESIngestionService（4 类数据 ingest + 测量→SPC IC 联动 + 去重）
-7. ~~同步调度~~ ✅ MESSyncService（manual/auto + SKIP LOCKED claim + claim_token UUID）
-8. ~~Outbox 推送~~ ✅ MESPushService（3 阶段短事务 + at-least-once + event_id 幂等）
-9. ~~生命周期管理~~ ✅ MESLifecycleService（7 天归档 + 失效 claim + 延迟清理）
-10. ~~API 路由~~ ✅ 13 端点（connections CRUD + test/sync + ingest + 3 类列表 + dashboard）
-11. ~~前端页面~~ ✅ 4 页（Connections + Dashboard + Production Orders + Scrap Records）+ 产品线联动
-12. ~~并发测试~~ ✅ 33 条 pytest（SKIP LOCKED / claim_token / 幂等 / Outbox 3 阶段 / 归档）
+### Umsetzungsdetails Phase 4 (Kurzfassung)
 
-**Phase 4 PLM 集成已完成 (2026-06-09)**:
-1. ~~数据库迁移~~ ✅ 9 张 PLM 表 + CHECK 约束（alembic/031）
-2. ~~ORM 模型~~ ✅ PLMConnection / PLMPart / PLMBOM / PLMChangeOrder / PLMSyncJob / PLMPushOutbox 等 9 个模型
-3. ~~Schema 层~~ ✅ RESTConfig 校验 + Pydantic v2 请求/响应 + BOM 树结构 + Part 特殊特性确认
-4. ~~连接器适配层~~ ✅ PLMConnector ABC + MockPLMConnector（分页/重试/auth/字段映射）
-5. ~~凭证安全~~ ✅ SHA-256 API Key hash + Fernet 加密出站凭证
-6. ~~数据接入服务~~ ✅ PLMIngestionService（BOM 导入 FMEA + Part→SC 特殊特性确认）
-7. ~~同步调度~~ ✅ PLMSyncService（manual/auto + SKIP LOCKED claim）
-8. ~~Outbox 推送~~ ✅ PLMPushService（3 阶段短事务 + at-least-once + event_id 幂等）
-9. ~~API 路由~~ ✅ 13 端点（connections CRUD + test/sync + ingest + BOM + parts + change orders）
-10. ~~前端页面~~ ✅ 4 页（Dashboard + Connections + Parts + ChangeOrders）+ 产品线联动
-11. ~~测试覆盖~~ ✅ 46 条后端回归测试 + 11 条前端权限测试
+- **MES (2026-06-05)**: Migration mit 9 Tabellen und CHECK-Constraints (alembic/030); Konnektor-ABC mit Mock/REST (Paginierung, Retry, Auth, Feldzuordnung); SHA-256-Hash der API-Keys, Fernet-verschlüsselte ausgehende Zugangsdaten; Ingestion inkl. Messwert→SPC; Synchronisation mit SKIP LOCKED und claim_token; Outbox mit 3 kurzen Transaktionen, at-least-once und idempotenter event_id; 7-Tage-Archivierung; 13 Endpunkte; 33 pytest-Nebenläufigkeitstests.
+- **PLM (2026-06-09)**: 9 Tabellen (alembic/031); Stücklistenimport in die FMEA und Bestätigung besonderer Merkmale; gleiche Muster für Zugangsdaten, Synchronisation und Outbox wie MES; 13 Endpunkte; 46 Backend- und 11 Frontend-Tests.
+- **ERP (2026-06-10)**: Modul `Module.ERP`; 12 Tabellen mit 8 CHECK-Constraints (alembic/032); Mock-Konnektor für 9 Datenarten + REST; DAG-Synchronisation in 4 Phasen; bidirektionale Rückverfolgung; Schwärzung von bank_info/tax_id unterhalb Berechtigungsstufe 4; über 20 Endpunkte; 6 Frontend-Seiten; 5 Code-Review-Runden.
+- **Eigene Dashboards (2026-06-09)**: Tabelle user_dashboard_layouts (JSONB, je Benutzer); GET/PUT des Layouts; WidgetLibraryPanel + WidgetWrapper; viewer ohne Bearbeitungsschaltflächen, Backend-403.
+- **KI-Qualitätstrend (2026-06-10)**: QualityTrendService, normierter scope_hash, LLM-Timeout-Behandlung, Audit-Typ ai_interpretation, Endpunkt POST /dashboard/quality-trend/interpret.
+- **Lieferanten-Risikowarnung (2026-06-11)**: 3 Tabellen mit partiellen eindeutigen Indizes; 10 reine Regelfunktionen (R01–R10); Gewichtung über alle aktiven Regeln + kritischer Bypass; Konfigurationsauflösung in 4 Ebenen; E-Mail (aiosmtplib) und Webhook (httpx + HMAC-SHA256); 14 Endpunkte.
+- **IQC-Stichprobenoptimierung (2026-06-11)**: 4 Tabellen + 2 Spalten, AQL-Stufenabbildung, Qualitätsprofil, über 20 Endpunkte, dynamische AQL-Injektion, Bereinigungs-Coroutine.
+- **SaaS-Mandanten (2026-06-13)**: PlatformBase (public) + TenantBase; getrennte Alembic-Zweige; TenantContextMiddleware mit dreistufiger Auflösung (Subdomain → X-Tenant-ID nur dev → JWT) und Statuscodes 503/410/400; search_path pro Anfrage; Plattform-API unter /api/platform/*; issuer/audience-Trennung von Mandanten- und Plattform-JWT; `run_for_each_tenant()` für Hintergrundaufgaben; 5 Sicherheitsaudit-Runden.
+- **Risikokarte der Lieferkette (2026-06-12)**: Tabelle supply_chain_risk_snapshots (UNIQUE NULLS NOT DISTINCT); Aggregation aus ERP-Liefertreue, Einkaufsanteil, SCAR und IQC-PPM; 6 Endpunkte; Modul `SUPPLY_CHAIN_RISK_MAP` mit VIEW/EDIT.
+- **Mehrwerksbetrieb (2026-06-12)**: Tabellen Factory/UserFactory/SupplierSharedProfile, `factory_id` mit Nachfüllung und NOT NULL in ~50 Geschäftstabellen; FactoryScope/ProductLineScope/PermissionScope; Modul `GROUP`; Konzernrouten /api/group/*; automatische factory_id-Injektion in Axios und Werksauswahl.
 
-**Phase 4 ERP 集成已完成 (2026-06-10)**:
-1. ~~权限注册~~ ✅ Module.ERP 枚举 + product_line_filter 映射
-2. ~~数据库迁移~~ ✅ 12 张 ERP 表 + 8 个 CHECK 约束 + 权限种子（alembic/032）
-3. ~~ORM 模型~~ ✅ ERPConnection / ERPSyncJob / ERPPushOutbox / ERPSupplier / ERPCustomer / ERPMaterial / ERPLocation / ERPPurchaseOrder / ERPSalesOrder / ERPInventoryBalance / ERPShipment / ERPCostRecord
-4. ~~Pydantic Schemas~~ ✅ RESTConfig 校验 + 分页 + Traceability + Dashboard 聚合
-5. ~~凭证安全~~ ✅ SHA-256 API Key + Fernet 加密（ERP_ENCRYPTION_KEY）
-6. ~~连接器~~ ✅ ERPConnector ABC + MockERPConnector（9 类数据）+ RESTERPConnector
-7. ~~服务层~~ ✅ ERPIngestionService（9 类 push + 日期强制转换 + 自动关联）+ ERPSyncService（4 阶段 DAG 依赖门控）+ ERPTraceabilityService（双向多记录追溯）
-8. ~~API 路由~~ ✅ 20+ 端点（CRUD + ingest + 列表 + link/unlink + dashboard + traceability）
-9. ~~字段脱敏~~ ✅ bank_info/tax_id 基于 permission_level < 4 动态脱敏
-10. ~~前端页面~~ ✅ 6 页（Dashboard + Connections + Master Data + Supply Chain + Sales & Cost + Traceability）
-11. ~~测试覆盖~~ ✅ Mock 连接器 + 数据摄取 + 追溯 + 脱敏 + 日期强制转换 + DAG 门控
-12. ~~5 轮代码审查~~ ✅ Alembic head 修正 + 事务提交/回滚 + 过滤器签名 + 角色键修正 + 脱敏完善 + 多记录追溯 + product_line_code 补全
-
-**Phase 4 自定义拖拽看板已完成 (2026-06-09)**:
-1. ~~后端模型~~ ✅ user_dashboard_layouts 表（JSONB 布局配置 + 用户级隔离）
-2. ~~后端 API~~ ✅ DashboardPage 路由：GET/PUT 布局配置 + 产品线过滤 + 权限校验
-3. ~~前端组件~~ ✅ WidgetLibraryPanel（分类面板）+ WidgetWrapper（拖拽容器）+ 18 种 widget
-4. ~~拖拽引擎~~ ✅ react-grid-layout：resize + drag + 自动持久化 + 响应式断点
-5. ~~Widget 库~~ ✅ KPI 卡片（6 种）+ 告警（4 种）+ SPC/MES/MSA/IQC/质量趋势 AI 等
-6. ~~产品线过滤~~ ✅ 所有 widget 统一 product_line 过滤 + service 层校验
-7. ~~权限控制~~ ✅ viewer 角色隐藏编辑按钮 + 后端 403 拦截
-
-**验收标准**: GA v3.0 发布 — 全功能发布
+**Abnahmekriterium**: Release GA v3.0 – voller Funktionsumfang
 
 ---
 
-## 项目统计 (截至 2026-06-25)
+## Phase 4+: FMEA-Assistenten und Bedienoptimierung (2026-06-14 bis 2026-06-25) ✅ abgeschlossen
 
-| 指标 | 数量 |
-|------|------|
-| Git 提交 | 1,060+ 次 |
-| 后端 Python 文件 | 215+ 个 |
-| 前端 TS/TSX 文件 | 195+ 个 |
-| API 路由模块 | 37 个 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/platform...) |
-| 前端页面 | 75+ 个 TSX 页面 |
-| 数据库表 | 109+ 张 (含 ERP 12 张 + Factory/Group 关联表 + Supply Chain Risk Snapshot + Platform 4 张 + Tenant 114 张业务表) |
-| 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 5 用户 + 2 工厂 + 多模块演示数据 |
+Nach Phase 4 wurden FMEA-Editor und Erzeugungsassistenten weiterentwickelt: geführte Modellierung nach den 7 Schritten AIAG-VDA, schreibgeschützte Ansicht von Versions-Snapshots, sicheres Löschen und Stammdaten für Produkttypen – jeweils mit Front- und Backend-Tests.
 
----
-
-## 里程碑时间线
-
-```
-2026 M2  ──── ✅ MVP 完成 (FMEA + 8D + Dashboard)
-2026 M4  ──── ✅ 核心模块上线 (内部 Beta)
-2026 M5  ──── ✅ 供应商/客户模块完成 (含增强功能)
-2026 M5  ──── ✅ 知识图谱基础设施 + 可视化上线
-2026 M6  ──── ✅ Phase 3 AI + 知识图谱增强全部完成
-2026 M6  ──── ✅ Phase 4 高级分析 + 生态集成完成
-2026 M6.5 ── ✅ 供应链风险地图上线
-2026 M6   ── ✅ Phase 4+ FMEA 向导化与体验优化（PFMEA/DFMEA 七步法向导、版本快照查看、安全删除、产品类型主数据）
-2026 M12 ──── 🔲 GA v2.0 发布
-2027 M4  ──── 🔲 全功能发布 (GA v3.0)
-```
-
----
-
-## MVP 技术资产
-
-| 类别 | 内容 |
-|------|------|
-| 提交数 | 1,050+ 次 |
-| 后端文件 | 210+ 个 Python 文件 |
-| 前端文件 | 195+ 个 TS/TSX 文件 |
-| API 端点 | 36 个路由模块 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/...) |
-| 前端页面 | 75+ 个 TSX 页面 |
-| 数据库表 | 105+ 张 (含多对多关联表 + Factory/Group) |
-| 状态机 | 2 个 (FMEA 5-state + 8D 9-state) |
-| 种子数据 | 5 用户 + 2 工厂 + 3 FMEA + 6 CAPA + 多模块演示数据 |
-
-## 子故事实现状态
-
-- **US-E2E-01.1 D3 临时/遏制措施**：实现态 v4（2026-07-12）— 4 类数据导入、受影响范围分析报告、AI 遏制建议、采纳/执行记录及 D3→D4 闸口已完成。
-
----
-
-## 下一步行动
-
-**Release Candidate 稳定化门禁：已通过**
-
-1. ✅ final fresh DB reset/migration/seed：`qms_e2e` 唯一 head `20260727_warranty_factory_id`；
-2. ✅ final `make check`：backend `1975 passed / 5 skipped / 5 xfailed / 0 failed`（181.95s），frontend tsc 与 Vite build 通过（7.61s）；
-3. ✅ final Playwright（zero retry）：44 total，`42 passed / 0 failed`，仅两项 allowed inverse skip；
-4. ✅ final CAPA PPT：`f3f5753b-cbd6-45ba-818b-c51df70a9d83` round 1 `passed`，11 slides/carriers/DB/audit 通过，`issues=[]`，非空 suggestions 为 advisory；
-5. ✅ collaboration 跨工厂访问无泄露、无副作用；最终系统集成菜单切片 `2/2 passed`；
-6. ⏳ 仍待稳定化分支评审，并决定是否集成至 `main`。
-
-**最终 Playwright allowed skips**：`no creds: advice endpoint 422 blocked + import still 200 blocked`；`no-LLM: D8 close is blocked (422 outcome=blocked)`。除此之外无 failed 或意外 skip。
-
-**历史：Phase 4 已完成（2026-06-13）**:
-
-Phase 4 全部功能已开发完毕。多租户架构是最后一个 Phase 4 模块，包括：
-- Schema-per-tenant 隔离（PostgreSQL schema 级别）
-- 平台/租户双 DeclarativeBase + Alembic 双分支迁移
-- JWT 域隔离（TENANT_ISSUER/AUDIENCE vs PLATFORM_ISSUER/AUDIENCE）
-- TenantContextMiddleware 三层租户解析 + 状态码处理
-- 租户配置 API + 完整种子数据
-- 5 轮安全审计修复
-- 43+ 条非数据库测试 + 8 条真实 JWT 验证测试
-
-**已完成 (2026-05-31)**:
-- [x] Neo4j 知识图谱基础设施 (Docker Compose + 双 Repository 实现 + API 路由)
-- [x] 知识图谱可视化前端 (G6 v5: GraphCanvas + 嵌入 FMEA tab + /knowledge-graph 全局页 + 5 场景交互)
-- [x] 全局知识库基础 (跨 FMEA 统计 + 相似节点搜索 + Pydantic 响应白名单脱敏)
-
-**已完成 (2026-06-01)**:
-- [x] 深色工业仪表盘 (ConfigProvider 暗色主题 + 仪表盘重写 + 响应式折叠 + 可访问性)
-- [x] AppLayout 清理 (移除硬编码颜色，依赖 ConfigProvider Token)
-- [x] D7 预防复发提示 (图结构匹配 + 关键词搜索 + 自动填充 + 软门禁 + 审计日志)
-
-**历史（Phase 3→4 过渡，已完成）**:
-- Phase 3 全部完成，Phase 4 已完成并进入 RC 稳定化。
-
-**已完成 (2026-06-02)**:
-- [x] 8D 根因+措施推荐 (D4/D5 智能推荐：FMEA 图匹配 + 规则引擎 + 推荐面板)
-
-**Phase 3 已完成 (2026-06-03)**:
-10. ~~FMEA 智能推荐接入知识图谱~~ ✅ `_query_graph_similarity` 图谱相似度匹配 + 来源文档标注
-11. ~~8D D4/D5 全混合管道升级~~ ✅ HybridRecommendationPipeline（4 D4 源 + 3 D5 源 + FusionEngine + LLMFusionLayer）
-
-**Phase 3 剩余 (待排期)**:
-- [x] FMEA 智能推荐 — 接入知识图谱相似度匹配 + 来源文档标注 — ✅ 已完成 (2026-06-03)
-- [x] 8D D4/D5 全混合管道升级 (历史 CAPA 匹配 + LLM 增强 + RAG 语义搜索替代关键词子串匹配) — ✅ 已完成 (2026-06-03)
-- [x] 变更影响分析 (设计参数变更 → 自动追溯影响范围) — ✅ 已完成 (2026-06-02)
-- [x] SPC-FMEA 异常关联推荐 (控制图异常 → 关联 FMEA → 推荐 8D) — ✅ 已完成 (2026-06-02)
-- [x] 多人协同编辑 (乐观锁 + 短轮询在线状态) — ✅ 已完成 (2026-06-02)
-- [x] 全局知识库脱敏 (跨产品线数据聚合时的敏感信息处理) — ✅ 已完成 (2026-06-02)
-
-**Phase 4 质量趋势 AI 解读已完成 (2026-06-10)**:
-1. ~~后端服务~~ ✅ QualityTrendService（规则摘要 + 按需 LLM 深度解读）
-2. ~~数据聚合~~ ✅ SPC/CAPA/FMEA 三源聚合 + 模块级权限过滤 + 产品线隔离
-3. ~~证据缓存~~ ✅ scope_hash 规范化（列表排序/去重）+ description hash + LLM 超时处理
-4. ~~审计日志~~ ✅ ai_interpretation 类型 + 模块过滤 + 限流
-5. ~~前端 Widget~~ ✅ QualityTrendAIWidget + AI 分类面板 + stale 检测 + 手动触发
-6. ~~API 端点~~ ✅ POST /dashboard/quality-trend/interpret（手动解读）
-7. ~~Dashboard 集成~~ ✅ Widget 注册 + 布局持久化 + 前端类型定义
-
-**Phase 4 已完成汇总 (截至 2026-06-11)**:
-- [x] MES 集成连接器 — 9 张表 + Mock/REST 双连接器 + Outbox 推送 + 33 并发测试
-- [x] PLM 集成连接器 — BOM 查询/导入 FMEA + Part→SC 特殊特性确认；9 张表；4 页前端；46 + 11 测试
-- [x] ERP 集成连接器 — 商务与供应链事实源；12 张表；4 阶段 DAG 同步；6 页前端；30 测试
-- [x] 8D 报告 AI 草拟 — LLM 辅助填充 D2-D8；结构化/段落双格式；限流 + 审计日志
-- [x] 质量趋势 AI 解读 — SPC/CAPA/FMEA 三源聚合 + 规则摘要 + 按需 LLM 深度解读 + Widget 集成
-- [x] 自定义看板（拖拽式）— react-grid-layout + 18 种 widget + 用户级 layout 存储 + 产品线过滤
-- [x] 经验教训智能推送 — 5 源适配器 + 融合排序 + 权限隔离缓存 + 前端 Modal；14 单元测试
-- [x] 控制计划智能校验 — 4 规则引擎 + 两表模型（findings/occurrences）+ 批量汇总 API + 前端面板/徽章 + 自动触发；30 测试
-- [x] IQC 抽样方案智能优化 — 规则引擎（10 条规则）+ 多级审批 + 质量画像 + PPM/SCAR/安全缺陷触发；4 张新表；4 页前端；18 单元测试
-- [x] 供应商风险智能预警 — 10 规则引擎 + 加权评分 + 4 级风险 + SCAR/CAPA 闭环 + 邮件/Webhook + 风险矩阵 + 45 测试
-
-**Phase 4 供应商风险智能预警已完成 (2026-06-11)**:
-1. ~~数据库迁移~~ ✅ 3 张新表 + 6 个部分唯一索引 + 权限种子
-2. ~~ORM + Schema~~ ✅ SupplierRiskAlert / Config / NotificationChannel + Pydantic v2
-3. ~~规则引擎~~ ✅ 10 条纯函数规则（R01-R10）+ SupplierRiskInput + RuleResult + RULE_REGISTRY
-4. ~~评分器~~ ✅ 按维度加权评分（分母 = 所有 active 规则权重）+ critical bypass（≥61 强制 high）
-5. ~~配置服务~~ ✅ 4 层优先级解析（supplier+PL > supplier > PL > global）+ batch 批量加载
-6. ~~评估服务~~ ✅ evaluate_supplier_risk（单供应商）+ evaluate_all_suppliers（批量查询）+ _upsert_alert（去重/升级）+ handle_alert（状态机）+ SCAR/CAPA 一键创建
-7. ~~通知服务~~ ✅ email（aiosmtplib）+ webhook（httpx + HMAC-SHA256）+ SSRF 保护 + Fernet 加密 + 批量加载优化
-8. ~~闭环联动~~ ✅ SCAR 关闭 → 预警关闭；CAPA D8 → 预警关闭；IQC 判决 → 增量评估触发；每日定时循环
-9. ~~API 路由~~ ✅ 14 端点（alerts CRUD / evaluate / dashboard / configs / channels）
-10. ~~前端~~ ✅ 风险矩阵散点图 + 预警表格 + 处置抽屉 + 规则配置页 + 通知渠道管理 + 侧边栏路由
-
-**Phase 4 IQC 抽样方案智能优化已完成 (2026-06-11)**:
-1. ~~Alembic merge + 数据库迁移~~ ✅ 4 张新表 + 2 新列 + 配置种子
-2. ~~ORM 模型~~ ✅ 4 新模型 + IqcInspection 扩展
-3. ~~Pydantic Schemas~~ ✅ 完整请求/响应 + IqcInspectionJudge 扩展
-4. ~~核心服务~~ ✅ 规则引擎 + AQL 阶梯映射 + 质量画像 + 档案/建议/配置管理器
-5. ~~API 路由~~ ✅ 20+ 端点 + judge 字段透传
-6. ~~集成~~ ✅ 动态 AQL 注入 + 规则评估触发 + 过期清理协程
-7. ~~后端测试~~ ✅ 18 条单元测试全绿
-8. ~~前端类型 + API~~ ✅ 5 接口 + 17 API 函数
-9. ~~前端页面~~ ✅ 4 页 + 2 组件 + 路由 + 侧边栏
-
-**Phase 4 SaaS 多租户架构已完成 (2026-06-13)**:
-1. ~~双 DeclarativeBase~~ ✅ PlatformBase（public schema）+ TenantBase（tenant schema）+ Base = TenantBase 别名
-2. ~~Alembic 双分支迁移~~ ✅ platform@head + tenant@head 独立分支 + t000 基线 + t001 squash（114 张业务表）
-3. ~~TenantContextMiddleware~~ ✅ 子域名 → X-Tenant-ID（dev only） → JWT tenant_id 三层回退解析 + 503/410/400 状态码
-4. ~~get_db + search_path~~ ✅ 请求级 search_path 设置 + ContextVar 传递 + 池 checkout RESET 安全网
-5. ~~平台 API~~ ✅ /api/platform/* 独立路由 + get_platform_db 强制 public + require_platform_admin（含 is_active DB 校验）
-6. ~~JWT 域隔离~~ ✅ TENANT_ISSUER/AUDIENCE + PLATFORM_ISSUER/AUDIENCE + iss/aud 密码学验证 + refresh token 含 tenant_id
-7. ~~后台任务租户隔离~~ ✅ run_for_each_tenant() 异步生成器 + 每租户 try/except + get_tenant_aware_session() ContextVar 读取
-8. ~~租户配置 API~~ ✅ POST /api/platform/tenants（含 admin_email/password）+ 列表 + 状态管理 + 完整种子（7 角色 + 25 权限 + 默认工厂/产品线 + 首个管理员）
-9. ~~5 轮安全审计修复~~ ✅ refresh token 域隔离 + iss/aud 密码学验证 + is_active DB 校验 + 未解析租户 400 + token type 检查 + 单租户模式跳过 bootstrap + session cleanup 简化 + 租户唯一性 409
-10. ~~测试覆盖~~ ✅ 43 条非数据库测试 + 8 条真实 JWT 验证测试 + 3 条生命周期测试（需 PostgreSQL）
-
-**Phase 4 供应链风险地图已完成 (2026-06-12)**:
-1. ~~数据库迁移~~ ✅ supply_chain_risk_snapshots 表 + UNIQUE NULLS NOT DISTINCT + 权限种子 + erp_purchase_orders.actual_delivery_date
-2. ~~ORM 模型~~ ✅ SupplyChainRiskSnapshot（risk_score/risk_level/quality_score/delivery_score/compliance_score + 8 维 JSONB dimensions）
-3. ~~聚合引擎~~ ✅ aggregate_supply_chain_metrics（ERP 准时率 + 采购占比 + SCAR 时间点 + IQC PPM）+ normalize_to_risk_index + ppm_to_risk_index
-4. ~~快照服务~~ ✅ generate_snapshot（仅当前月 UPSERT）+ heatmap/timeline/detail/comparison/export 5 端点 + pg_try_advisory_lock 调度
-5. ~~API 路由~~ ✅ 6 端点（heatmap/timeline/supplier-detail/compare/snapshot-generate/export）
-6. ~~前端页面~~ ✅ RiskHeatmap + HeatmapToolbar + TimelineSlider + DetailPanel + SupplierDetail + SupplierComparison + DiffIndicator + DataSourceBadge + ExportButton
-7. ~~产品线隔离~~ ✅ 快照/热力图/时间线/详情/趋势查询均按 product_line_code 过滤，NULL = 全局
-8. ~~权限控制~~ ✅ Module.SUPPLY_CHAIN_RISK_MAP + VIEW/EDIT 分级 + 前端按需显示
-9. ~~测试覆盖~~ ✅ 6 服务测试 + 5 聚合测试 + 6 集成测试 + 4 e2e 测试
-10. ~~代码审查修复~~ ✅ timeline 路由递归 → import alias；PPM risk_index 超限 → ppm_to_risk_index；硬编码产品线 → useProductLineStore；权限按钮 → usePermission；ERP JOIN 缺失 connection_id；delivery_delay_days 类型处理；趋势 product_line/period 过滤
-
-**Phase 4 多工厂部署支持已完成 (2026-06-12)**:
-1. ~~数据库迁移~~ ✅ Factory/UserFactory/SupplierSharedProfile 表 + factory_id 列 + 回填 + NOT NULL 强制
-2. ~~ORM 模型~~ ✅ Factory + UserFactory + AuditProgramTargetFactory + SupplierSharedProfile + ~50 业务表 factory_id
-3. ~~Scope 层~~ ✅ FactoryScope / ProductLineScope / PermissionScope 三层模型 + resolve_* + apply_scope_filter + populate_factory_id + validate_factory_invariant
-4. ~~权限系统~~ ✅ Module.GROUP 枚举 + GROUP ADMIN/VIEW 独立于 bypass_row_level_security + RequestScope 依赖注入
-5. ~~API 层~~ ✅ /api/group/* 集团路由（dashboard / comparison / factories CRUD / shared-suppliers / cross-factory-audits）+ 全模块 factory_id 过滤
-6. ~~前端~~ ✅ Axios factory_id 自动注入 + 工厂切换器 + 侧边栏集团菜单 + Group API 客户端 + 集团仪表盘/对比/工厂管理页
-7. ~~种子数据~~ ✅ 第二工厂 + GROUP ADMIN 用户
-8. ~~测试~~ ✅ Factory isolation (14) + scope resolution (41) + 管理评审 API (5) + 权限解耦边界测试
-9. ~~代码审查修复~~ ✅ GROUP VIEW 明细响应工厂范围过滤 + product_line 列表过滤 + shipment 重复校验 + 管理评审 API 测试修复
-
----
-
-## Phase 4+: FMEA 向导化与体验优化 (2026-06-14 ~ 2026-06-25) ✅ 已完成
-
-Phase 4 收官后在 `fix/fmea-fixes` 分支上持续迭代 FMEA 编辑器与生成向导，落地 AIAG-VDA 七步法的引导式建模、版本快照只读查看、安全删除，以及产品类型主数据，全部带前后端测试。
-
-| 功能 | 状态 | 说明 |
+| Funktion | Status | Beschreibung |
 |------|------|------|
-| PFMEA 七步法生成向导 | ✅ 完成 | `PFMEAWizardPage`：Step 0 范围定义 → Step 1 结构树 → Step 2 功能树（`FunctionTreeEditor`，3 级功能 + `FUNCTION_MAPPED_TO` + CC/SC）→ Step 3 失效链（4M 语境）→ Step 4 风险表（`RiskTable`，severity 取层级 max、CC/SC 只读聚合、O/D 门禁）→ Step 5 优化（AP=H + 推荐措施）→ Step 6 确认完成门禁；配套 `usePfmeaWizardValidation`（4M/OP 门禁、3 级严重度、CC/SC 感知）+ `PFMEAWizardSidebar` + `PFMEAGuidanceCard` + `wizardCascadeDelete` |
-| DFMEA 向导增强 | ✅ 完成 | 时间区间改为 `DatePicker.RangePicker`；5T 工具/趋势 AI 推荐（`pfmea_tool` / `pfmea_trend` 触发器 + 4M 规则内容）；Step 3 AI 推荐（`SmartSuggestionDropdown` 接后端触发器取代规则桩）；Step 5 风险分析承载 Step 4 上下文 + PC/DC 创建前置；PC/DC AI 推荐；工具结构引导卡（`ToolStructureGuide`）+ `ScopeTagField` 触发联合扩展 |
-| FMEA 版本快照只读查看器 | ✅ 完成 | 编辑器内通过 `viewingVersion` 状态嵌入历史版本只读预览（`FMEAVersionSnapshot` / `CPVersionSnapshot`），替换原占位页；版本快照查看不改变当前可编辑态 |
-| FMEA 删除 | ✅ 完成 | 列表页对 `draft` / `rework` 状态开放删除；后端状态守卫拒绝其他状态；删除前 `_null_out_fmea_references` 将 `control_plan` / `capa` 等关联记录外键置空，避免 IntegrityError → 500；FK 回归测试覆盖 |
-| 产品类型主数据 | ✅ 完成 | `product_types` 表（code 主键 + name + 描述 + is_active）+ `product_lines.product_type_code` 外键（`ondelete=RESTRICT`）+ 后端 API（list/create/update/delete）+ `ProductTypePage` / `ProductLinePage` 管理页（`requireAdmin` 守卫）+ 语义搜索 `product_type` 过滤；跨工厂共享的主数据 |
-| FMEA 图谱布局清晰度 | ✅ 完成 | `CAUSE_OF` 渲染方向修正 + 默认 TB 层次方向 + 边按分支着色 + 边类型图例 + 方向切换 Segmented（`graphDirection` 状态注入 `GraphCanvas`）+ PNG 导出合成背景色保证内容可见；提取 `toG6Data` / `graphLayoutOptions` / `GraphDirection` 至 utils |
-| 结构树拖拽 @dnd-kit 迁移 | ✅ 完成 | 原 8 轮原生 HTML5 DnD 对 n≥2 步触达架构上限，迁移至 `@dnd-kit`（`FMEAEditorDragSort`），稳定支持多级排序 |
-| 推荐缓存与作用域 | ✅ 完成 | `recommendation_cache` 修复 upsert + KG 视图前置条件隔离（CI 稳定）+ `recommendation_scope` 作用域收敛 |
+| PFMEA-Assistent nach 7 Schritten | ✅ fertig | `PFMEAWizardPage`: Schritt 0 Umfang → 1 Strukturbaum → 2 Funktionsbaum (`FunctionTreeEditor`, 3 Funktionsebenen + `FUNCTION_MAPPED_TO` + CC/SC) → 3 Fehlerkette (4M-Kontext) → 4 Risikotabelle (`RiskTable`, Bedeutung als Maximum der Ebenen, CC/SC schreibgeschützt aggregiert, O/D-Gates) → 5 Optimierung (AP=H + empfohlene Maßnahmen) → 6 Abschluss-Gate; dazu `usePfmeaWizardValidation` (4M/OP-Gates, dreistufige Bedeutung, CC/SC-bewusst) + `PFMEAWizardSidebar` + `PFMEAGuidanceCard` + `wizardCascadeDelete` |
+| Erweiterungen des DFMEA-Assistenten | ✅ fertig | Zeitraum als `DatePicker.RangePicker`; KI-Empfehlungen für 5T-Werkzeuge/-Trends (Auslöser `pfmea_tool` / `pfmea_trend` + 4M-Regeln); KI-Empfehlungen in Schritt 3 (`SmartSuggestionDropdown` an Backend-Auslöser statt Regel-Stub); Risikoanalyse in Schritt 5 mit Kontext aus Schritt 4 + PC/DC vor dem Anlegen; KI-Empfehlungen für PC/DC; Strukturleitfaden (`ToolStructureGuide`) + `ScopeTagField` |
+| Schreibgeschützte Ansicht von FMEA-Versionen | ✅ fertig | Im Editor über den Zustand `viewingVersion` eingebettete Vorschau historischer Versionen (`FMEAVersionSnapshot` / `CPVersionSnapshot`) statt Platzhalterseite; die aktuelle Bearbeitbarkeit bleibt unverändert |
+| FMEA löschen | ✅ fertig | Listenseite erlaubt das Löschen in `draft` / `rework`; das Backend lehnt andere Status ab; vor dem Löschen setzt `_null_out_fmea_references` Fremdschlüssel verknüpfter Datensätze (`control_plan`, `capa` usw.) auf NULL, um IntegrityError → 500 zu vermeiden; mit FK-Regressionstests |
+| Stammdaten Produkttyp | ✅ fertig | Tabelle `product_types` (code als Schlüssel + name + Beschreibung + is_active) + Fremdschlüssel `product_lines.product_type_code` (`ondelete=RESTRICT`) + Backend-API (list/create/update/delete) + Verwaltungsseiten `ProductTypePage` / `ProductLinePage` (Schutz `requireAdmin`) + Filter `product_type` in der Semantiksuche; werksübergreifend geteilte Stammdaten |
+| Übersichtlicheres FMEA-Graphlayout | ✅ fertig | Richtung von `CAUSE_OF` korrigiert + standardmäßig hierarchisch von oben nach unten + Kantenfarbe je Zweig + Legende der Kantentypen + Richtungsumschaltung per Segmented + PNG-Export mit Hintergrund; `toG6Data` / `graphLayoutOptions` / `GraphDirection` nach utils ausgelagert |
+| Drag & Drop im Strukturbaum mit @dnd-kit | ✅ fertig | Das native HTML5-DnD stieß nach 8 Iterationen bei n≥2 Schritten an architektonische Grenzen; Umstieg auf `@dnd-kit` (`FMEAEditorDragSort`) für stabiles mehrstufiges Sortieren |
+| Empfehlungs-Cache und Gültigkeitsbereich | ✅ fertig | Upsert in `recommendation_cache` korrigiert + Trennung der Vorbedingungen der KG-Ansicht (stabile CI) + engerer `recommendation_scope` |
 
-**验收标准**: FMEA 编辑器全流程（手工建模 + 向导生成 + 版本回溯 + 安全删除）端到端可用，前后端回归全绿。
+**Abnahmekriterium**: Der gesamte FMEA-Ablauf (manuelle Modellierung + Assistent + Versionsrückblick + sicheres Löschen) funktioniert durchgängig, Front- und Backend-Regression grün.
+
+---
+
+## Projektkennzahlen (Stand 2026-06-25)
+
+| Kennzahl | Anzahl |
+|------|------|
+| Git-Commits | 1.060+ |
+| Python-Dateien im Backend | 215+ |
+| TS/TSX-Dateien im Frontend | 195+ |
+| API-Routenmodule | 37 (auth/fmea/capa/dashboard/iqc/scar/supplier/customer/spc/msa/ppap/apqp/audit/management_review/erp/group/supply_chain_risk_map/platform …) |
+| Frontend-Seiten | 75+ TSX-Seiten |
+| Datenbanktabellen | 109+ (inkl. 12 ERP-Tabellen, Werks-/Konzernverknüpfungen, Snapshot der Lieferkettenrisiken, 4 Plattformtabellen, 114 Geschäftstabellen je Mandant) |
+| Zustandsautomaten | 2 (FMEA mit 5 Status, 8D) |
+| Seed-Daten | 5 Benutzer + 2 Werke + Demodaten für mehrere Module |
+
+---
+
+## Meilensteine
+
+```
+2026 M2   ── ✅ MVP fertig (FMEA + 8D + Dashboard)
+2026 M4   ── ✅ Kernmodule live (interne Beta)
+2026 M5   ── ✅ Lieferanten-/Kundenmodule fertig (inkl. Erweiterungen)
+2026 M5   ── ✅ Infrastruktur und Visualisierung des Wissensgraphen live
+2026 M6   ── ✅ Phase 3 KI + Wissensgraph vollständig
+2026 M6   ── ✅ Phase 4 erweiterte Analytik + Integration fertig
+2026 M6.5 ── ✅ Risikokarte der Lieferkette live
+2026 M6   ── ✅ Phase 4+ FMEA-Assistenten und Bedienoptimierung (PFMEA/DFMEA-Assistent nach 7 Schritten, Versionsansicht, sicheres Löschen, Produkttyp-Stammdaten)
+2026 M12  ── 🔲 Release GA v2.0
+2027 M4   ── 🔲 Release mit vollem Funktionsumfang (GA v3.0)
+```
+
+---
+
+## Umsetzungsstand von Teilfunktionen
+
+- **D3 – vorläufige Eindämmungsmaßnahmen**: Umsetzungsstand v4 (2026-07-12) – Import von 4 Datenarten, Bericht zum betroffenen Umfang, KI-Vorschläge zur Eindämmung, Erfassung von Übernahme/Ausführung und Gate D3→D4 sind fertig.
+
+---
+
+## Nächste Schritte
+
+**Stabilisierungs-Gate für den Release Candidate: bestanden**
+
+1. ✅ Abschließender frischer DB-Reset/Migration/Seed: `qms_e2e` mit einzigem Head `20260727_warranty_factory_id`;
+2. ✅ Abschließendes `make check`: Backend `1975 passed / 5 skipped / 5 xfailed / 0 failed` (181,95 s), Frontend tsc und Vite-Build bestanden (7,61 s);
+3. ✅ Abschließendes Playwright (ohne Retries): 44 insgesamt, `42 passed / 0 failed`, nur zwei erlaubte inverse Skips;
+4. ✅ Abschließendes CAPA-PPT: `f3f5753b-cbd6-45ba-818b-c51df70a9d83` Runde 1 `passed`, 11 Folien/Träger/DB/Audit bestanden, `issues=[]`, nicht leere suggestions sind nur Hinweise;
+5. ✅ Kein werksübergreifendes Datenleck und keine Seiteneffekte beim gemeinsamen Bearbeiten; abschließender Ausschnitt des Integrationsmenüs `2/2 passed`;
+6. ⏳ Review des Stabilisierungsbranches und Entscheidung über die Integration in `main` stehen noch aus.
+
+**Erlaubte Skips im abschließenden Playwright-Lauf**: `no creds: advice endpoint 422 blocked + import still 200 blocked`; `no-LLM: D8 close is blocked (422 outcome=blocked)`. Darüber hinaus keine Fehlschläge und keine unerwarteten Skips.
+
+Den aktuellen Arbeitsstand und offene Punkte führt [PROGRESS.md](../PROGRESS.md).

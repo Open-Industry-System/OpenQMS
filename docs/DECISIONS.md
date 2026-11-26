@@ -1,240 +1,240 @@
-# 决策日志 (Architecture Decision Records)
+# Entscheidungsprotokoll (Architecture Decision Records)
 
-本文档记录 OpenQMS 关键设计决策、做出决策时的背景以及随之带来的影响。
-仅记录会**长期约束**代码或团队的决策；可逆的实现细节、临时 hack 不进入此文件。
+Dieses Dokument hält zentrale Designentscheidungen von OpenQMS fest – mit dem Kontext zum Zeitpunkt der Entscheidung und ihren Folgen.
+Aufgenommen werden nur Entscheidungen, die Code oder Team **langfristig binden**; umkehrbare Implementierungsdetails und vorübergehende Workarounds gehören nicht hierher.
 
-## 格式约定
+## Format
 
-每条决策使用轻量 ADR 格式：
+Jede Entscheidung folgt einem schlanken ADR-Format:
 
-- **编号**：`ADR-NNNN`，单调递增，落定后不再复用
-- **日期**：决策落定日 (`YYYY-MM-DD`)
-- **状态**：`Accepted` / `Superseded by ADR-XXXX` / `Deprecated`
-- **背景**：当时的问题、约束、备选方案
-- **决策**：选择了什么，**没**选什么
-- **影响**：对代码、运维、团队的正负面后果
+- **Nummer**: `ADR-NNNN`, monoton steigend, nach Festlegung nie wiederverwendet
+- **Datum**: Tag der Festlegung (`YYYY-MM-DD`)
+- **Status**: `Accepted` / `Superseded by ADR-XXXX` / `Deprecated`
+- **Kontext**: damaliges Problem, Randbedingungen, Alternativen
+- **Entscheidung**: was gewählt wurde und was **nicht**
+- **Folgen**: positive und negative Auswirkungen auf Code, Betrieb und Team
 
-新决策追加在文件末尾。**已落定的决策不要原地改写**——若被推翻，新增一条 ADR 并把旧条目状态改为 `Superseded by ADR-XXXX`。
-
----
-
-## ADR-0001 — 主键统一使用 Python 端生成的 UUID v4
-
-- **日期**：2025-08-15
-- **状态**：Accepted
-- **背景**：多工厂、多租户场景下需要跨库去重、离线生成 ID、避免自增 ID 暴露业务量级。备选：PG `bigserial`、PG 端 `gen_random_uuid()`、Python 端 `uuid4()`。
-- **决策**：所有业务表主键统一为 `UUID v4`，由 Python 端 (`uuid.uuid4()`) 生成；ORM 层定义 `default=uuid.uuid4`，DB 列类型为 `UUID(as_uuid=True)`。
-- **影响**：
-  - ✅ 跨工厂/租户 ID 不冲突，便于未来集团合并、外部系统对接
-  - ✅ Service 层能在 `flush` 前拿到 ID，方便组装关联对象
-  - ⚠️ 索引体积大于 `bigint`；分页/排序时不要按主键排序，统一用 `created_at DESC`
-  - ⚠️ Alembic 迁移文件必须显式声明 `UUID(as_uuid=True)`，否则 PG 会回落到 `VARCHAR(36)`
-
-## ADR-0002 — FMEA 用 JSONB 图模型，不做关系表拆分
-
-- **日期**：2025-09-10
-- **状态**：Accepted
-- **背景**：AIAG-VDA 7 步法 PFMEA/DFMEA 节点关系是动态图（System→Subsystem→…→FailureMode→Effect/Cause→Controls），节点种类多且常新增。备选：完全关系化（≥ 12 张关联表）、文档型（MongoDB）、JSONB 图。
-- **决策**：`fmea_documents.graph_data` JSONB 列存 `{nodes: [...], edges: [...]}`，节点/边类型用枚举字符串约束；前端 `fmeaTable.ts` 双向转换为 20+ 列的电子表格行。
-- **影响**：
-  - ✅ 节点类型增删不需要 schema 迁移；DFMEA/PFMEA 共用同一份代码
-  - ✅ 整图一次性读写，无 N+1
-  - ⚠️ 跨 FMEA 查询（"这个零件出现在哪些 FMEA 中？"）必须 `jsonb_array_elements()`，不能走索引——为此引入了 Neo4j + JSONB 双 Repository（见 ADR-0010）
-  - ⚠️ 共享节点（控制措施、行动）的删除必须做引用计数：`fmeaTable.ts` 行删除时检查"是否还有其他行引用"，否则会误删
-  - ⚠️ Dashboard RPN 聚合用原始 SQL + `jsonb_array_elements()`（见 ADR-0007）
-
-## ADR-0003 — 多工厂数据隔离用 `factory_id` 行级过滤，不用 schema-per-tenant（同一部署内）
-
-- **日期**：2025-10-02
-- **状态**：Accepted（SaaS 多租户层另见 ADR-0012）
-- **背景**：客户内部多工厂部署需要让"工厂 A 的工程师看不到工厂 B 的数据"，但同一份代码、同一个 DB。备选：每工厂独立 schema、每工厂独立 DB、行级 `factory_id`。
-- **决策**：所有业务表带 `factory_id NOT NULL`；`core/factory_scope.py` 提供 `check_factory_access(entity, scope)`；`core/deps.py` 的 `RequestScope` 在每个请求注入"用户可见工厂集合"。Users 表 `factory_id` 允许 NULL，表示集团管理员。
-- **影响**：
-  - ✅ 部署/迁移简单，跨工厂报表/集团审计无需联邦查询
-  - ✅ 行级权限与 RBAC 解耦：角色管"能做什么"，scope 管"能看哪些行"
-  - ⚠️ **每个新模块的 Service 方法都必须显式调 `check_factory_access`**——漏掉就是越权漏洞，CI 没法静态检查
-  - ⚠️ 跨工厂统计接口（Group Admin Dashboard）要单独标注豁免，否则会被 scope 过滤成空
-
-## ADR-0004 — Service 层手写 AuditLog，不用 SQLAlchemy event hook 自动审计
-
-- **日期**：2025-10-18
-- **状态**：Accepted
-- **背景**：合规（IATF 16949 / ISO 9001）要求所有质量记录可追溯。备选：SQLAlchemy `event.listens_for(Session, "after_flush")` 自动审计、AOP 装饰器、Service 层手动写入。
-- **决策**：所有 CRUD 在 Service 方法里**手工**创建 `AuditLog` 行，字段含 `actor_id / module / action / entity_id / before / after / reason`。
-- **影响**：
-  - ✅ 业务上下文显式（"为什么改"，自动 hook 拿不到）；可写入业务字段，比如 8D 阶段、FMEA 修订号
-  - ✅ 测试可断言"调一次 update → 写一条 audit"，事件钩子很难测
-  - ⚠️ **新 Service 方法漏写 AuditLog 是最常见 bug**——code review checklist 必查
-  - ⚠️ `enqueue_embedding()` 必须在 `await db.commit()` **之前**调用，否则 outbox 行会丢（与 audit 同 transaction）
-
-## ADR-0005 — JWT HS256 + 120 min 过期，不用 OAuth2 第三方/refresh token
-
-- **日期**：2025-09-25
-- **状态**：Superseded by ADR-0014
-- **背景**：内部部署为主，没有第三方 IdP；用户接受 2 小时后重新登录。备选：JWT RS256（需要密钥分发）、Session + Redis、OAuth2 + refresh token。
-- **决策**：HS256 单 secret，`SECRET_KEY` 环境变量；token `sub=user_id`，120 min `exp`；前端 `ProtectedRoute` 本地校验过期；过期则 axios 拦截器清 token → `/login`。无 refresh token。
-- **影响**：
-  - ✅ 实现简单，无后端 session 存储
-  - ⚠️ 无主动登出/撤销机制——修改密码后旧 token 仍可用最长 2 小时
-  - ⚠️ `SECRET_KEY` 必须在部署/测试两侧一致；测试用 `SECRET_KEY=test-secret-key`
-  - ⚠️ 登录无速率限制（见 `PROGRESS.md` Known Gaps），后续需引入
-
-## ADR-0006 — 权限矩阵 = 7 角色 × 25 模块 × 5 级，不做 ACL/策略引擎
-
-- **日期**：2025-10-12
-- **状态**：Accepted
-- **背景**：质量管理领域职责清晰（admin / manager / quality_engineer / viewer + group_admin / supplier_manager / customer_manager），不需要任意主体-对象-动作的策略系统。备选：Casbin、OPA、内置 RBAC 矩阵。
-- **决策**：`role_definitions` × `permissions` 表存矩阵；`core/permissions.py` 定义 `Module` / `PermissionLevel` 枚举；API 层用 `require_permission(Module.X, PermissionLevel.Y)` 装饰；前端 `usePermission` hook 镜像逻辑用于菜单过滤。状态机审批权限（FMEA 审批、8D D7/D8 closure）在 Service 层硬编码 role check，不进矩阵。
-- **影响**：
-  - ✅ 矩阵可视化、易审计；新角色只需在 seed 里追加
-  - ✅ 前后端权限一致性靠同一个 `Module` 枚举常量（前端从 `types/index.ts` 镜像）
-  - ⚠️ 业务级"只能审批同工厂"等横切规则不在矩阵里，散落在 Service——引入 `core/factory_scope.py` 收口（见 ADR-0003）
-  - ⚠️ 完整矩阵见 `docs/permissions.md`，修改时**必须**同步更新该文档
-
-## ADR-0007 — Dashboard 聚合用原始 SQL + JSONB 函数，不用 ORM
-
-- **日期**：2025-11-04
-- **状态**：Accepted
-- **背景**：Dashboard 要把 FMEA `graph_data` JSONB 里的所有 FailureMode 节点摊平统计 RPN，SQLAlchemy ORM 无法表达。备选：ORM relation hack、应用层 Python 聚合、原始 SQL `text()`。
-- **决策**：`services/dashboard_service.py` 用 `db.execute(text(...))`，配合 `jsonb_array_elements(graph_data->'nodes')` 摊平后 `GROUP BY`、`AVG`、`COUNT`。SQL 字符串中所有用户输入走绑定参数 (`:name`)。
-- **影响**：
-  - ✅ 单查询完成，避免拉 1000 个 FMEA 文档到 Python
-  - ⚠️ SQL 与 PG 绑定，跨 DB 不可移植——可接受
-  - ⚠️ JSONB 路径变化（节点 schema 改字段名）会让 dashboard 静默返回 0；schema 演进时需同步检查这里
-
-## ADR-0008 — 前端只用 Zustand 管 auth + product line + factory，业务数据用 `useState`
-
-- **日期**：2025-09-30
-- **状态**：Accepted
-- **背景**：React 18 + Vite + Ant Design 已成型，需要决定状态管理方案。备选：Redux Toolkit、Zustand 全局、纯 `useState` + props。
-- **决策**：Zustand 只承载跨页全局：`useAuthStore`、`useProductLineStore`、`useFactoryStore`。每个页面的列表/筛选/表单状态用本地 `useState`；分页数据按 `PaginatedResponse<T>` 泛型规范返回。
-- **影响**：
-  - ✅ 学习成本低，页面文件自包含
-  - ✅ 无 selector 重渲染玄学
-  - ⚠️ 跨页缓存（"刷新列表后跳详情再回来"）丢失——可接受
-  - ⚠️ 未引入 React Query / SWR：所有 axios 调用手写 loading/error，重复样板较多
-
-## ADR-0009 — FMEA 编辑器不引入第三方表格库，自建 Ant `Input`+`Select` 电子表格
-
-- **日期**：2025-10-22
-- **状态**：Accepted
-- **背景**：20+ 列、单元格类型差异大（下拉、级联、长文本、数字）、行间数据相互联动（S/O/D → AP 自动查表）。备选：AG Grid、Handsontable、ant-table-edit、原生表格。
-- **决策**：用 Ant Design `Input`、`Select`、`InputNumber` 组合手写表格；`utils/fmea.ts` 提供 AIAG-VDA Action Priority 查表；`utils/fmeaTable.ts` 处理 JSONB graph ↔ 行模型双向转换。
-- **影响**：
-  - ✅ 无授权费 / bundle 增量；与现有 Ant Design 样式天然一致
-  - ✅ 完全可控（行 fanout 按 cause × effect、多 Effect、共享节点引用计数都自定义）
-  - ⚠️ 性能上限：单文档 > 500 行会卡，目前未触发
-  - ⚠️ 复制粘贴 / 多选 / 撤销 等 spreadsheet 习惯功能要自己实现
-
-## ADR-0010 — 知识图谱用 Neo4j + JSONB 双 Repository，不是迁移到 Neo4j
-
-- **日期**：2025-12-08
-- **状态**：Accepted
-- **背景**：跨 FMEA 检索（相似失效模式、变更影响 BFS）在 PG JSONB 上不可索引，但完全迁移 Neo4j 会丢掉事务和 Alembic 迁移。备选：纯 PG + 物化视图、纯 Neo4j、双源同步。
-- **决策**：PG JSONB 是**真源** (source of truth)；FMEA 保存时异步同步到 Neo4j（`graph/` 模块）；查询时按场景路由——CRUD 走 JSONB Repository、相似/BFS 走 Neo4j Repository。Neo4j 数据丢失时可从 PG 重建。
-- **影响**：
-  - ✅ 事务/审计仍在 PG，Neo4j 故障不影响主流程
-  - ✅ 推荐/影响分析可享受图遍历性能
-  - ⚠️ 双写一致性：依赖 outbox + 重试，未做强校验脚本
-  - ⚠️ 部署多一个服务（docker-compose 已含）
-
-## ADR-0011 — Agent 框架不用 pydantic-ai，自研轻量 harness 直接调 openai/anthropic SDK
-
-- **日期**：2026-06-15
-- **状态**：Accepted
-- **背景**：P0 AI Agent Base 需要工具调用 + HITL 审批 + 三层记忆 + guardrails。pydantic-ai 是首选，但其依赖 pydantic ≥ 2.10，而项目锁定 pydantic 2.9.2（FastAPI 0.115 + 大量已写 schema 不能升）。备选：升级 pydantic 全栈、用 LangChain、自研 harness。
-- **决策**：在 `app/agent/` 自研 harness——三态网关 (5-tuple 白名单) + HITL 审批 + 3 层 memory + guardrails，工具调用直接走 openai/anthropic 官方 SDK。
-- **影响**：
-  - ✅ 不破坏 pydantic 2.9.2 锁定
-  - ✅ 6 张 `agent_*` 表 + 82 单测，行为可控
-  - ⚠️ 自己维护工具调用 loop；多工具并发、anthropic `tool_result` shaping 是 P2 follow-up
-  - ⚠️ 详细 root cause 见 memory `ai-driven-qms-p0-agent-base.md`
-
-## ADR-0012 — SaaS 多租户用 schema-per-tenant + JWT 域隔离，不在 row 上再加 `tenant_id`
-
-- **日期**：2026-01-20
-- **状态**：Accepted
-- **背景**：SaaS 客户要求"我的数据物理隔离"，但同一份代码服务多客户。备选：所有表加 `tenant_id`（在 `factory_id` 之上再叠一层）、schema-per-tenant、DB-per-tenant。
-- **决策**：每租户独立 PG schema（`tenant_xxx`）；JWT 域名 (`acme.openqms.com`) 路由到对应 schema；schema 内沿用 ADR-0003 的 `factory_id` 行级隔离。新租户通过模板 schema clone。
-- **影响**：
-  - ✅ 物理隔离合规友好；导出/迁移单租户只需 `pg_dump --schema`
-  - ✅ 现有业务代码无需再加 `tenant_id`
-  - ⚠️ Alembic 迁移需对每个 schema 跑一遍——封装在部署脚本
-  - ⚠️ 跨租户集团报表不可行（设计上即如此）
-
-## ADR-0013 — Alembic 迁移手写，不用 autogenerate
-
-- **日期**：2025-08-20
-- **状态**：Accepted
-- **背景**：autogenerate 对 JSONB、enum、约束改名、复合索引识别不稳定，且生产数据迁移常需自定义 SQL（数据回填、分批 UPDATE）。备选：纯 autogenerate、autogenerate + 手工校对、纯手写。
-- **决策**：所有迁移文件**手写** `op.create_table / op.add_column / op.execute(...)`；命名 `NNNN_<动词>_<对象>.py`，复杂数据迁移在 `upgrade()` 里用 `op.execute(text(...))`。
-- **影响**：
-  - ✅ 数据迁移和 schema 迁移在同一文件，回滚明确
-  - ✅ JSONB 字段、check constraint 行为可控
-  - ⚠️ 编号偶发冲突（多分支并行开发时）——`PROGRESS.md` Known Gaps 已标注，需规范
-  - ⚠️ 新开发者上手成本略高，参考已有迁移文件模仿
-
-## ADR-0014 — 每浏览器会话使用哈希存储、轮换且可撤销的 Refresh Token
-
-- **日期**：2026-09-14
-- **状态**：Accepted
-- **背景**：ADR-0005 的单一 120 分钟 access JWT 无法在过期时无感续期，也无法隔离多个浏览器登录或检测 refresh credential 重放。系统仍不引入第三方 OAuth2/IdP，需要在保留 HS256 access JWT 的同时增加最小、可审计的服务端会话安全状态。
-- **决策**：
-  - 每次浏览器登录创建独立 refresh session；JWT 中的稳定 `sid` 标识会话，每次签发生成新的随机 `jti`。数据库仅保存完整 Refresh Token 的 `SHA-256` hash，不保存明文。
-  - 刷新时对 `(sid, user_id)` 的**精确行锁**执行校验与轮换；旧 hash 在一次成功轮换后立即失效，旧 Token replay 重放一律拒绝。刷新期限按成功使用滚动，是 inactivity-based 不活跃期限，而不是固定登录总时长。
-  - 不含 `sid` 的 legacy Refresh Token 只允许一次升级：在用户行锁内核对旧值、清除旧列并签发新的 session token，之后不能再次升级或重放。
-  - 前端对同一时刻的 `401` 合并刷新，并只在新旧 access JWT 属于同一 identity 时重放原请求；跨标签页同步最新 generation，清空旧身份派生状态，再通过 `/auth/me` 安全恢复用户、权限与工厂/产品线范围。
-  - 密码重置会撤销该用户全部 refresh sessions；已经签发的无状态 access JWT 仍可能继续有效至原 120 分钟过期。通过 token-version 或 denylist 立即撤销 access JWT 的方案延期，未在本决策中实现。
-  - `user_refresh_sessions` 行是认证安全状态，不是质量/业务 CRUD 记录，因此轮换不写入业务 `AuditLog`。登录成功与失败继续写入 `LoginAuditLog`；管理员密码重置本身仍按用户变更写业务审计。
-- **影响**：
-  - ✅ 用户在持续使用期间可自动续期，同时不同浏览器会话互不覆盖
-  - ✅ 数据库泄露时不直接暴露可用 refresh credential；精确行锁与 hash 轮换提供一次性使用/replay 防护
-  - ✅ 跨标签页竞争不会把旧用户请求重放到新登录身份
-  - ⚠️ 密码重置不是 access JWT 的即时撤销；最高仍有 120 分钟窗口，运维与管理员界面必须明确该边界
-  - ⚠️ Refresh rotation 属于高频认证安全状态，故意不复制到合规业务 `AuditLog`；安全监控应使用认证日志与异常指标
-
-## ADR-0015 — Oracle 实例作为公开可写演示环境，特权账号显式公开
-
-- **日期**：2026-09-18
-- **状态**：Superseded by ADR-0016
-- **背景**：原上线方案只公开 Viewer，要求轮换 `admin`、`engineer`、`manager`、`groupadmin` 密码。实例所有者改为让访客体验真实权限，明确选择保留这四个共享演示账号及其完整写入/管理能力，并在登录页显示凭据。
-- **决策**：
-  - 域名在 Namecheap BasicDNS 配置 `qms` A 记录直指 Oracle 公网 IP，由 Caddy 终止 HTTPS；不迁移到 Cloudflare 代理。公网 SSH 22 暂按实例所有者选择保留，Tailscale 仍用于管理。
-  - 默认构建仍只允许 Viewer 只读演示；额外四账号必须通过可选 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` 的完整 JSON 显式启用，构建时嵌入浏览器 bundle，正常 `/login` 才展示五账号及共享可写警告。点击只填表、不自动登录；后端 RBAC 不降权。
-  - 这些凭据是有意公开的演示值，不得复用员工密码。此实例不得录入真实数据或真实 LLM/Embedding/API 密钥；其他正式生产环境仍应轮换全部特权密码并禁用额外演示构建输入。
-- **影响**：
-  - ✅ 访客可体验 Viewer、工程师、经理及管理员功能；当前 Viewer 仍保持只读。
-  - ⚠️ `admin` 与 `groupadmin` 拥有真实管理员权限，任意访客可修改账号密码、权限和共享数据；演示数据不具备完整性保证，也没有自动重置。静态页面展示的密码可能被访客更改后失效：恢复原公开值无需重新构建；若改为另一公开值，必须更新构建输入并重新发布。
-  - ⚠️ PostgreSQL 备份目前仅同机；公开可写环境不适合承载任何客户、员工或合规数据。禁用演示构建时必须清空所有 `VITE_PUBLIC_DEMO_*` 凭据输入，不能只隐藏 UI。
-
-## ADR-0016 — 公开演示仅保留无用户修改权限的三个账号
-
-- **日期**：2026-09-19
-- **状态**：Accepted（Supersedes ADR-0015）
-- **背景**：ADR-0015 计划公开 `admin` 与 `groupadmin`，但两者都是 `admin` 角色，可通过 `user_mgmt` 修改其他账号密码与权限。实例所有者随后明确要求管理员账号不公开，以防访客改动其他账号。
-- **决策**：公开登录页只展示 `Viewer`（账号 `viewer`）、`engineer` 和 `manager`；`admin`、`groupadmin` 保持私密，也不得写入 `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS`。其中 `engineer` 的 `user_mgmt` 为 0，`manager` 仅为 VIEW=1，均不能修改用户或密码。可选 JSON 必须恰好包含 `engineer` 与 `manager`，否则前端 fail closed。
-- **影响**：
-  - ✅ 访客仍可体验只读、质量工程师和经理审批流程，且不能进入用户修改接口。
-  - ✅ `admin` 当前默认密码返回 401 不再阻塞三账号页面发布，也无需为公开展示恢复。
-  - ⚠️ `engineer` 与 `manager` 仍可修改大量共享质量数据；演示数据没有自动重置，仍不得录入真实数据或真实 API 密钥。
-  - ⚠️ 这是账号展示约束，不替代后端 RBAC；每次发布仍需回归验证公开账号的 `user_mgmt` 权限和对 `/api/auth/users/{id}` 的 403 边界。
+Neue Entscheidungen werden am Ende angehängt. **Festgelegte Entscheidungen nicht an Ort und Stelle umschreiben** – wird eine Entscheidung revidiert, eine neue ADR anlegen und den Status der alten auf `Superseded by ADR-XXXX` setzen.
 
 ---
 
-## 何时写新 ADR
+## ADR-0001 — Primärschlüssel einheitlich als in Python erzeugte UUID v4
 
-下列任一即写：
+- **Datum**: 2025-08-15
+- **Status**: Accepted
+- **Kontext**: Bei mehreren Werken und Mandanten müssen IDs datenbankübergreifend eindeutig und offline erzeugbar sein; fortlaufende IDs sollen kein Geschäftsvolumen verraten. Alternativen: PG `bigserial`, PG-seitiges `gen_random_uuid()`, Python-seitiges `uuid4()`.
+- **Entscheidung**: Alle Primärschlüssel der Geschäftstabellen sind `UUID v4`, erzeugt in Python (`uuid.uuid4()`); das ORM definiert `default=uuid.uuid4`, der Spaltentyp ist `UUID(as_uuid=True)`.
+- **Folgen**:
+  - ✅ Keine ID-Konflikte über Werke/Mandanten hinweg; erleichtert spätere Konzernzusammenführung und Anbindung externer Systeme
+  - ✅ Die Service-Schicht kennt die ID bereits vor dem `flush` und kann verknüpfte Objekte zusammenbauen
+  - ⚠️ Indizes sind größer als bei `bigint`; nicht nach Primärschlüssel paginieren/sortieren, sondern einheitlich nach `created_at DESC`
+  - ⚠️ Alembic-Migrationen müssen `UUID(as_uuid=True)` explizit angeben, sonst fällt PG auf `VARCHAR(36)` zurück
 
-1. 选了一项会**长期约束**代码走向的技术或模式（库、协议、数据模型）
-2. **拒绝**了一个看起来合理的方案（"为什么不用 X" 的预防性记录）
-3. 因外部约束（合规、性能、依赖锁定）让代码偏离常规做法
+## ADR-0002 — FMEA als JSONB-Graphmodell, keine Aufteilung in relationale Tabellen
 
-下列**不**写：
+- **Datum**: 2025-09-10
+- **Status**: Accepted
+- **Kontext**: Die Knotenbeziehungen der PFMEA/DFMEA nach AIAG-VDA (7 Schritte) bilden einen dynamischen Graphen (System→Subsystem→…→FailureMode→Effect/Cause→Controls) mit vielen und häufig neuen Knotentypen. Alternativen: vollständig relational (≥ 12 Verknüpfungstabellen), dokumentenorientiert (MongoDB), JSONB-Graph.
+- **Entscheidung**: Die JSONB-Spalte `fmea_documents.graph_data` speichert `{nodes: [...], edges: [...]}`, Knoten- und Kantentypen werden über Enum-Strings eingeschränkt; `fmeaTable.ts` im Frontend wandelt bidirektional in Tabellenzeilen mit 20+ Spalten um.
+- **Folgen**:
+  - ✅ Neue oder entfallende Knotentypen brauchen keine Schemamigration; DFMEA/PFMEA teilen sich denselben Code
+  - ✅ Der ganze Graph wird in einem Zug gelesen/geschrieben, kein N+1
+  - ⚠️ FMEA-übergreifende Abfragen („In welchen FMEAs kommt dieses Bauteil vor?“) brauchen `jsonb_array_elements()` und können keinen Index nutzen – daher die doppelten Repositories Neo4j + JSONB (siehe ADR-0010)
+  - ⚠️ Gemeinsam genutzte Knoten (Maßnahmen, Aktionen) erfordern Referenzzählung beim Löschen: `fmeaTable.ts` prüft beim Zeilenlöschen, ob andere Zeilen sie noch referenzieren, sonst würde versehentlich gelöscht
+  - ⚠️ Die RPN-Aggregation im Dashboard nutzt rohes SQL + `jsonb_array_elements()` (siehe ADR-0007)
 
-- 单文件实现细节、bug 修复、变量改名
-- 临时绕过（应该写 `# TODO` 或 `PROGRESS.md`）
-- 单模块内部选择，对其他模块无影响
+## ADR-0003 — Werkstrennung über zeilenweisen `factory_id`-Filter statt Schema pro Mandant (innerhalb eines Deployments)
+
+- **Datum**: 2025-10-02
+- **Status**: Accepted (SaaS-Mandantenschicht siehe ADR-0012)
+- **Kontext**: Bei Kunden mit mehreren Werken soll „die Ingenieurin in Werk A die Daten von Werk B nicht sehen“ – bei gleichem Code und gleicher Datenbank. Alternativen: Schema je Werk, Datenbank je Werk, zeilenweise `factory_id`.
+- **Entscheidung**: Alle Geschäftstabellen haben `factory_id NOT NULL`; `core/factory_scope.py` stellt `check_factory_access(entity, scope)` bereit; `RequestScope` in `core/deps.py` injiziert pro Anfrage die „für den Benutzer sichtbaren Werke“. In der Tabelle `users` darf `factory_id` NULL sein; das kennzeichnet Konzernadministratoren.
+- **Folgen**:
+  - ✅ Einfaches Deployment und einfache Migration; werksübergreifende Berichte und Konzernaudits ohne föderierte Abfragen
+  - ✅ Zeilenrechte und RBAC sind entkoppelt: Rollen regeln „was darf ich tun“, der Scope „welche Zeilen darf ich sehen“
+  - ⚠️ **Jede Service-Methode eines neuen Moduls muss `check_factory_access` explizit aufrufen** – ein vergessener Aufruf ist eine Rechteausweitung, die CI nicht statisch erkennt
+  - ⚠️ Werksübergreifende Statistikschnittstellen (Group-Admin-Dashboard) müssen ausdrücklich als Ausnahme gekennzeichnet werden, sonst filtert der Scope sie leer
+
+## ADR-0004 — AuditLog manuell in der Service-Schicht statt automatischer SQLAlchemy-Event-Hooks
+
+- **Datum**: 2025-10-18
+- **Status**: Accepted
+- **Kontext**: Compliance (IATF 16949 / ISO 9001) verlangt Rückverfolgbarkeit aller Qualitätsaufzeichnungen. Alternativen: automatisches Audit per SQLAlchemy `event.listens_for(Session, "after_flush")`, AOP-Dekorator, manuelles Schreiben in der Service-Schicht.
+- **Entscheidung**: Jede CRUD-Operation legt in der Service-Methode **manuell** eine `AuditLog`-Zeile an, mit den Feldern `actor_id / module / action / entity_id / before / after / reason`.
+- **Folgen**:
+  - ✅ Fachlicher Kontext ist explizit („warum geändert“ – das sieht ein automatischer Hook nicht); fachliche Felder wie 8D-Phase oder FMEA-Revisionsnummer lassen sich mitschreiben
+  - ✅ Tests können prüfen „ein update → ein Audit-Eintrag“; Event-Hooks sind schwer zu testen
+  - ⚠️ **Ein vergessenes AuditLog in neuen Service-Methoden ist der häufigste Fehler** – Pflichtpunkt der Code-Review-Checkliste
+  - ⚠️ `enqueue_embedding()` muss **vor** `await db.commit()` aufgerufen werden, sonst gehen Outbox-Zeilen verloren (gleiche Transaktion wie das Audit)
+
+## ADR-0005 — JWT HS256 mit 120 Minuten Gültigkeit, kein OAuth2-Drittanbieter/Refresh-Token
+
+- **Datum**: 2025-09-25
+- **Status**: Superseded by ADR-0014
+- **Kontext**: Überwiegend interne Deployments ohne Dritt-IdP; Benutzer akzeptieren eine erneute Anmeldung nach 2 Stunden. Alternativen: JWT RS256 (Schlüsselverteilung nötig), Session + Redis, OAuth2 + Refresh-Token.
+- **Entscheidung**: HS256 mit einem Secret aus der Umgebungsvariablen `SECRET_KEY`; Token mit `sub=user_id` und 120 Minuten `exp`; `ProtectedRoute` im Frontend prüft den Ablauf lokal; bei Ablauf löscht der Axios-Interceptor das Token → `/login`. Kein Refresh-Token.
+- **Folgen**:
+  - ✅ Einfache Umsetzung, keine serverseitige Session-Speicherung
+  - ⚠️ Keine aktive Abmeldung bzw. kein Widerruf – nach einer Passwortänderung bleibt ein altes Token bis zu 2 Stunden gültig
+  - ⚠️ `SECRET_KEY` muss in Deployment und Tests übereinstimmen; Tests verwenden `SECRET_KEY=test-secret-key`
+  - ⚠️ Kein Rate-Limiting beim Login (siehe Known Gaps in `PROGRESS.md`), muss nachgezogen werden
+
+## ADR-0006 — Berechtigungsmatrix = 7 Rollen × 25 Module × 5 Stufen, kein ACL-/Policy-Engine
+
+- **Datum**: 2025-10-12
+- **Status**: Accepted
+- **Kontext**: Im Qualitätsmanagement sind die Zuständigkeiten klar (admin / manager / quality_engineer / viewer + group_admin / supplier_manager / customer_manager); ein beliebiges Subjekt-Objekt-Aktion-Policy-System ist unnötig. Alternativen: Casbin, OPA, eingebaute RBAC-Matrix.
+- **Entscheidung**: Die Tabellen `role_definitions` × `permissions` speichern die Matrix; `core/permissions.py` definiert die Enums `Module` / `PermissionLevel`; die API-Schicht nutzt `require_permission(Module.X, PermissionLevel.Y)`; der Frontend-Hook `usePermission` spiegelt die Logik für die Menüfilterung. Freigaberechte der Zustandsautomaten (FMEA-Freigabe, 8D-Abschluss D7/D8) sind in der Service-Schicht als Rollenprüfung fest codiert und nicht Teil der Matrix.
+- **Folgen**:
+  - ✅ Die Matrix ist sichtbar und gut auditierbar; neue Rollen werden nur im Seed ergänzt
+  - ✅ Konsistenz zwischen Frontend und Backend über dieselben `Module`-Konstanten (im Frontend aus `types/index.ts` gespiegelt)
+  - ⚠️ Fachliche Querschnittsregeln wie „nur im eigenen Werk freigeben“ stehen nicht in der Matrix, sondern verstreut in Services – gebündelt über `core/factory_scope.py` (siehe ADR-0003)
+  - ⚠️ Die vollständige Matrix steht in `docs/permissions.md`; bei Änderungen **muss** dieses Dokument mit aktualisiert werden
+
+## ADR-0007 — Dashboard-Aggregation mit rohem SQL + JSONB-Funktionen statt ORM
+
+- **Datum**: 2025-11-04
+- **Status**: Accepted
+- **Kontext**: Das Dashboard muss alle FailureMode-Knoten aus dem JSONB `graph_data` der FMEAs flach auswerten und die RPN statistisch aggregieren; das kann das SQLAlchemy-ORM nicht ausdrücken. Alternativen: ORM-Relation-Hack, Aggregation in Python, rohes SQL mit `text()`.
+- **Entscheidung**: `services/dashboard_service.py` nutzt `db.execute(text(...))` mit `jsonb_array_elements(graph_data->'nodes')` zum Abflachen und danach `GROUP BY`, `AVG`, `COUNT`. Alle Benutzereingaben im SQL laufen über Bind-Parameter (`:name`).
+- **Folgen**:
+  - ✅ Eine einzige Abfrage, statt 1000 FMEA-Dokumente nach Python zu laden
+  - ⚠️ SQL ist an PG gebunden und nicht portabel – akzeptiert
+  - ⚠️ Änderungen an JSONB-Pfaden (umbenannte Felder im Knotenschema) lassen das Dashboard stillschweigend 0 liefern; bei Schemaänderungen hier mitprüfen
+
+## ADR-0008 — Im Frontend verwaltet Zustand nur Auth + Produktlinie + Werk, Geschäftsdaten über `useState`
+
+- **Datum**: 2025-09-30
+- **Status**: Accepted
+- **Kontext**: React 18 + Vite + Ant Design waren gesetzt; die Zustandsverwaltung musste entschieden werden. Alternativen: Redux Toolkit, Zustand global, reines `useState` + Props.
+- **Entscheidung**: Zustand trägt nur seitenübergreifende globale Zustände: `useAuthStore`, `useProductLineStore`, `useFactoryStore`. Listen-, Filter- und Formularzustände jeder Seite liegen in lokalem `useState`; paginierte Daten folgen dem generischen `PaginatedResponse<T>`.
+- **Folgen**:
+  - ✅ Geringe Lernkurve, Seitendateien sind in sich geschlossen
+  - ✅ Keine undurchsichtigen Selector-Re-Renders
+  - ⚠️ Seitenübergreifender Cache („Liste aktualisieren, Detail öffnen, zurück“) geht verloren – akzeptiert
+  - ⚠️ Kein React Query / SWR: alle Axios-Aufrufe behandeln Loading/Error von Hand, viel wiederholter Boilerplate
+
+## ADR-0009 — FMEA-Editor ohne Tabellenbibliothek, eigene Tabelle aus Ant `Input`+`Select`
+
+- **Datum**: 2025-10-22
+- **Status**: Accepted
+- **Kontext**: 20+ Spalten, stark unterschiedliche Zelltypen (Dropdown, Kaskade, Langtext, Zahl) und zeilenübergreifende Abhängigkeiten (S/O/D → AP per Tabelle). Alternativen: AG Grid, Handsontable, ant-table-edit, native Tabelle.
+- **Entscheidung**: Tabelle von Hand aus Ant Design `Input`, `Select` und `InputNumber`; `utils/fmea.ts` enthält die AIAG-VDA-Action-Priority-Tabelle; `utils/fmeaTable.ts` übernimmt die bidirektionale Umwandlung JSONB-Graph ↔ Zeilenmodell.
+- **Folgen**:
+  - ✅ Keine Lizenzkosten und kein Bundle-Zuwachs; passt von Haus aus zum Ant-Design-Stil
+  - ✅ Vollständig steuerbar (Zeilen-Fan-out nach Ursache × Folge, mehrere Folgen, Referenzzählung gemeinsamer Knoten – alles selbst definiert)
+  - ⚠️ Performancegrenze: ab > 500 Zeilen pro Dokument wird es träge, bisher nicht erreicht
+  - ⚠️ Tabellenübliche Funktionen wie Kopieren/Einfügen, Mehrfachauswahl und Rückgängig müssen selbst gebaut werden
+
+## ADR-0010 — Wissensgraph mit doppeltem Repository Neo4j + JSONB statt Migration nach Neo4j
+
+- **Datum**: 2025-12-08
+- **Status**: Accepted
+- **Kontext**: FMEA-übergreifende Suche (ähnliche Fehlerarten, BFS für Änderungsauswirkungen) ist auf PG-JSONB nicht indexierbar; eine vollständige Migration nach Neo4j würde Transaktionen und Alembic-Migrationen aufgeben. Alternativen: reines PG + materialisierte Views, reines Neo4j, Synchronisation zweier Quellen.
+- **Entscheidung**: PG-JSONB ist die **führende Quelle** (source of truth); beim Speichern einer FMEA wird asynchron nach Neo4j synchronisiert (Modul `graph/`); Abfragen werden je Fall geroutet – CRUD über das JSONB-Repository, Ähnlichkeit/BFS über das Neo4j-Repository. Gehen Neo4j-Daten verloren, lassen sie sich aus PG neu aufbauen.
+- **Folgen**:
+  - ✅ Transaktionen und Audit bleiben in PG; ein Neo4j-Ausfall beeinträchtigt die Kernprozesse nicht
+  - ✅ Empfehlungen und Auswirkungsanalysen profitieren von der Graph-Traversierung
+  - ⚠️ Konsistenz beim doppelten Schreiben: beruht auf Outbox + Retry, kein strenges Prüfskript
+  - ⚠️ Ein Dienst mehr im Deployment (in docker-compose enthalten)
+
+## ADR-0011 — Agent-Framework ohne pydantic-ai, eigener schlanker Harness direkt auf openai/anthropic-SDK
+
+- **Datum**: 2026-06-15
+- **Status**: Accepted
+- **Kontext**: Die P0-AI-Agent-Basis braucht Tool-Aufrufe + HITL-Freigabe + dreistufiges Gedächtnis + Guardrails. pydantic-ai war erste Wahl, benötigt aber pydantic ≥ 2.10, während das Projekt pydantic 2.9.2 fixiert (FastAPI 0.115 + viele bestehende Schemas, kein Upgrade möglich). Alternativen: pydantic im ganzen Stack aktualisieren, LangChain, eigener Harness.
+- **Entscheidung**: Eigener Harness in `app/agent/` – dreistufiges Gateway (5-Tupel-Whitelist) + HITL-Freigabe + 3-stufiges Memory + Guardrails; Tool-Aufrufe direkt über die offiziellen openai/anthropic-SDKs.
+- **Folgen**:
+  - ✅ Die Fixierung auf pydantic 2.9.2 bleibt intakt
+  - ✅ 6 Tabellen `agent_*` + 82 Unit-Tests, kontrollierbares Verhalten
+  - ⚠️ Die Tool-Call-Schleife wird selbst gepflegt; parallele Tools und das `tool_result`-Shaping für anthropic sind P2-Folgearbeiten
+  - ⚠️ Detaillierte Ursachenanalyse in der Memory-Notiz `ai-driven-qms-p0-agent-base.md`
+
+## ADR-0012 — SaaS-Mandantenfähigkeit über Schema pro Mandant + JWT-Domänentrennung, kein zusätzliches `tenant_id` pro Zeile
+
+- **Datum**: 2026-01-20
+- **Status**: Accepted
+- **Kontext**: SaaS-Kunden verlangen „physisch getrennte Daten“, der Code soll aber mehrere Kunden bedienen. Alternativen: `tenant_id` in allen Tabellen (zusätzlich zu `factory_id`), Schema pro Mandant, Datenbank pro Mandant.
+- **Entscheidung**: Jeder Mandant erhält ein eigenes PG-Schema (`tenant_xxx`); die JWT-Domäne (`acme.openqms.com`) wird auf das passende Schema geroutet; innerhalb des Schemas gilt weiter die zeilenweise `factory_id`-Trennung aus ADR-0003. Neue Mandanten entstehen per Klon eines Vorlagen-Schemas.
+- **Folgen**:
+  - ✅ Physische Trennung ist compliance-freundlich; Export/Migration eines Mandanten braucht nur `pg_dump --schema`
+  - ✅ Bestehender Geschäftscode braucht kein `tenant_id`
+  - ⚠️ Alembic-Migrationen müssen für jedes Schema laufen – im Deployment-Skript gekapselt
+  - ⚠️ Mandantenübergreifende Konzernberichte sind nicht möglich (so gewollt)
+
+## ADR-0013 — Alembic-Migrationen von Hand, kein autogenerate
+
+- **Datum**: 2025-08-20
+- **Status**: Accepted
+- **Kontext**: autogenerate erkennt JSONB, Enums, umbenannte Constraints und zusammengesetzte Indizes unzuverlässig; Produktionsmigrationen brauchen oft eigenes SQL (Datennachpflege, UPDATE in Tranchen). Alternativen: reines autogenerate, autogenerate + manuelle Prüfung, rein manuell.
+- **Entscheidung**: Alle Migrationen werden **von Hand** mit `op.create_table / op.add_column / op.execute(...)` geschrieben; Benennung `NNNN_<verb>_<objekt>.py`; komplexe Datenmigrationen nutzen in `upgrade()` `op.execute(text(...))`.
+- **Folgen**:
+  - ✅ Daten- und Schemamigration liegen in derselben Datei, Rollback ist eindeutig
+  - ✅ Verhalten von JSONB-Feldern und Check-Constraints ist steuerbar
+  - ⚠️ Gelegentliche Nummernkonflikte (bei parallelen Branches) – in den Known Gaps von `PROGRESS.md` vermerkt, muss vereinheitlicht werden
+  - ⚠️ Etwas höhere Einstiegshürde für neue Entwickler; an vorhandenen Migrationen orientieren
+
+## ADR-0014 — Pro Browsersitzung gehashte, rotierende und widerrufbare Refresh-Tokens
+
+- **Datum**: 2026-09-14
+- **Status**: Accepted
+- **Kontext**: Das einzelne 120-Minuten-Access-JWT aus ADR-0005 lässt sich bei Ablauf nicht unbemerkt verlängern, trennt mehrere Browser-Anmeldungen nicht und erkennt kein Replay von Refresh-Credentials. Ohne Dritt-OAuth2/IdP soll das HS256-Access-JWT erhalten bleiben und um einen minimalen, auditierbaren serverseitigen Sitzungs-Sicherheitszustand ergänzt werden.
+- **Entscheidung**:
+  - Jede Browser-Anmeldung erzeugt eine eigene Refresh-Session; die stabile `sid` im JWT identifiziert die Sitzung, jede Ausstellung erzeugt eine neue zufällige `jti`. Die Datenbank speichert nur den `SHA-256`-Hash des vollständigen Refresh-Tokens, nie den Klartext.
+  - Beim Refresh werden Prüfung und Rotation unter einer **exakten Zeilensperre** (row lock) auf `(sid, user_id)` ausgeführt; der alte Hash ist nach einer erfolgreichen Rotation sofort ungültig, jedes Replay eines alten Tokens wird abgelehnt. Die Refresh-Frist ist rollierend (rolling) ab der letzten erfolgreichen Nutzung, also eine inactivity-basierte Inaktivitätsfrist und keine feste Gesamtdauer der Anmeldung.
+  - Ein legacy Refresh-Token ohne `sid` darf genau einmal aufgewertet werden: unter der Zeilensperre des Benutzers wird der alte Wert geprüft, die alte Spalte geleert und ein neues Session-Token ausgestellt; danach ist weder erneutes Aufwerten noch Replay möglich.
+  - Das Frontend bündelt gleichzeitige `401`-Antworten zu einem Refresh und wiederholt die ursprüngliche Anfrage nur, wenn altes und neues Access-JWT zur selben Identität (identity) gehören; über Tabs hinweg wird die neueste Generation synchronisiert, von der alten Identität abgeleiteter Zustand geleert und anschließend über `/auth/me` Benutzer, Berechtigungen und Werks-/Produktlinienbereich sicher wiederhergestellt.
+  - Ein Passwort-Reset widerruft alle Refresh-Sessions des Benutzers; bereits ausgestellte zustandslose Access-JWTs (access) können bis zu ihrem ursprünglichen 120-Minuten-Ablauf gültig bleiben. Ein sofortiger Widerruf von Access-JWTs über Token-Version oder Denylist ist vertagt und nicht Teil dieser Entscheidung.
+  - Zeilen in `user_refresh_sessions` sind Authentifizierungs-Sicherheitszustand und keine Qualitäts-/Geschäfts-CRUD-Datensätze; die Rotation schreibt daher kein fachliches `AuditLog`. Erfolgreiche und fehlgeschlagene Anmeldungen werden weiterhin in `LoginAuditLog` erfasst; der Passwort-Reset durch einen Administrator wird als Benutzeränderung weiterhin fachlich auditiert.
+- **Folgen**:
+  - ✅ Bei fortlaufender Nutzung wird automatisch verlängert, und verschiedene Browsersitzungen überschreiben sich nicht
+  - ✅ Ein Datenbankleck legt keine direkt nutzbaren Refresh-Credentials offen; exakte Zeilensperre und Hash-Rotation schützen vor Mehrfachnutzung/Replay
+  - ✅ Konkurrenz zwischen Tabs führt nicht dazu, dass Anfragen des alten Benutzers unter der neuen Identität wiederholt werden
+  - ⚠️ Ein Passwort-Reset widerruft Access-JWTs nicht sofort; es bleibt ein Fenster von bis zu 120 Minuten, das Betrieb und Admin-Oberfläche klar benennen müssen
+  - ⚠️ Die Refresh-Rotation ist hochfrequenter Authentifizierungszustand und wird bewusst nicht ins fachliche Compliance-`AuditLog` kopiert; Sicherheitsmonitoring nutzt Authentifizierungslogs und Anomalie-Kennzahlen
+
+## ADR-0015 — Oracle-Instanz als öffentlich beschreibbare Demo, privilegierte Konten ausdrücklich öffentlich
+
+- **Datum**: 2026-09-18
+- **Status**: Superseded by ADR-0016
+- **Kontext**: Der ursprüngliche Go-live-Plan veröffentlichte nur den Viewer und verlangte die Rotation der Passwörter von `admin`, `engineer`, `manager` und `groupadmin`. Der Eigentümer der Instanz entschied sich um, damit Besucher echte Berechtigungen ausprobieren können: Die vier gemeinsamen Demo-Konten bleiben mit vollen Schreib-/Verwaltungsrechten erhalten und ihre Zugangsdaten stehen auf der Login-Seite.
+- **Entscheidung**:
+  - Die Domain erhält bei Namecheap BasicDNS einen `qms`-A-Eintrag direkt auf die öffentliche Oracle-IP; Caddy terminiert HTTPS; kein Umzug auf einen Cloudflare-Proxy. Öffentliches SSH auf Port 22 bleibt vorerst nach Wahl des Eigentümers offen, Tailscale dient weiter der Verwaltung.
+  - Der Standard-Build erlaubt weiterhin nur die schreibgeschützte Viewer-Demo; die vier zusätzlichen Konten müssen über das optionale vollständige JSON in `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` ausdrücklich aktiviert werden, werden beim Build ins Browser-Bundle eingebettet, und erst dann zeigt das normale `/login` fünf Konten samt Warnung zur gemeinsamen Schreibnutzung. Ein Klick füllt nur das Formular aus und meldet nicht automatisch an; das Backend-RBAC wird nicht abgeschwächt.
+  - Diese Zugangsdaten sind absichtlich öffentliche Demo-Werte und dürfen keine Mitarbeiterpasswörter wiederverwenden. In dieser Instanz dürfen keine echten Daten und keine echten LLM-/Embedding-/API-Schlüssel erfasst werden; andere echte Produktivumgebungen müssen weiterhin alle privilegierten Passwörter rotieren und die zusätzliche Demo-Build-Eingabe deaktivieren.
+- **Folgen**:
+  - ✅ Besucher können Viewer-, Ingenieur-, Manager- und Administratorfunktionen ausprobieren; der Viewer bleibt schreibgeschützt.
+  - ⚠️ `admin` und `groupadmin` haben echte Administratorrechte; jeder Besucher kann Passwörter, Berechtigungen und gemeinsame Daten ändern. Die Demodaten haben keine Integritätsgarantie und kein automatisches Zurücksetzen. Auf der statischen Seite angezeigte Passwörter können durch Besucher ungültig werden: Die Wiederherstellung des ursprünglichen öffentlichen Werts erfordert keinen Neubau; bei einem anderen öffentlichen Wert müssen Build-Eingabe und Release aktualisiert werden.
+  - ⚠️ PostgreSQL-Sicherungen liegen derzeit nur auf demselben Host; eine öffentlich beschreibbare Umgebung eignet sich nicht für Kunden-, Mitarbeiter- oder Compliance-Daten. Beim Deaktivieren des Demo-Builds müssen alle `VITE_PUBLIC_DEMO_*`-Zugangseingaben geleert werden; nur die UI zu verstecken genügt nicht.
+
+## ADR-0016 — Öffentliche Demo nur mit drei Konten ohne Rechte zur Benutzeränderung
+
+- **Datum**: 2026-09-19
+- **Status**: Accepted (Supersedes ADR-0015)
+- **Kontext**: ADR-0015 sah vor, `admin` und `groupadmin` zu veröffentlichen; beide haben die Rolle `admin` und können über `user_mgmt` Passwörter und Rechte anderer Konten ändern. Der Eigentümer der Instanz verlangte daraufhin ausdrücklich, Administratorkonten nicht zu veröffentlichen, damit Besucher keine anderen Konten verändern.
+- **Entscheidung**: Die öffentliche Login-Seite zeigt nur `Viewer` (Konto `viewer`), `engineer` und `manager`; `admin` und `groupadmin` bleiben privat und dürfen auch nicht in `VITE_PUBLIC_DEMO_ADDITIONAL_ACCOUNTS` stehen. `engineer` hat für `user_mgmt` die Stufe 0, `manager` nur VIEW=1; beide können keine Benutzer oder Passwörter ändern. Das optionale JSON muss genau `engineer` und `manager` enthalten, sonst schlägt das Frontend geschlossen fehl (fail closed).
+- **Folgen**:
+  - ✅ Besucher können weiterhin Lesezugriff, Qualitätsingenieur- und Manager-Freigabeabläufe ausprobieren, gelangen aber nicht an die Schnittstellen zur Benutzeränderung.
+  - ✅ Dass das aktuelle Standardpasswort von `admin` 401 liefert, blockiert die Veröffentlichung der Drei-Konten-Seite nicht mehr und muss für die öffentliche Anzeige nicht wiederhergestellt werden.
+  - ⚠️ `engineer` und `manager` können weiterhin viele gemeinsame Qualitätsdaten ändern; die Demodaten werden nicht automatisch zurückgesetzt, daher weiterhin keine echten Daten und keine echten API-Schlüssel erfassen.
+  - ⚠️ Dies ist eine Vorgabe zur Kontoanzeige und ersetzt nicht das Backend-RBAC; jedes Release muss die `user_mgmt`-Rechte der öffentlichen Konten und die 403-Grenze für `/api/auth/users/{id}` per Regression prüfen.
 
 ---
 
-> 历史背景：本文件 2026-06-30 创建，前 13 条 ADR 是对项目已有决策的**回溯整理**，日期取自最相关的代码合入日。之后的决策按落定日实时记录。
+## Wann eine neue ADR schreiben
+
+Eine ADR wird geschrieben, wenn einer dieser Punkte zutrifft:
+
+1. Es wurde eine Technik oder ein Muster gewählt, das die Richtung des Codes **langfristig bindet** (Bibliothek, Protokoll, Datenmodell)
+2. Ein plausibel wirkender Ansatz wurde **abgelehnt** (vorbeugende Dokumentation „warum nicht X“)
+3. Externe Randbedingungen (Compliance, Performance, fixierte Abhängigkeiten) zwingen den Code weg vom üblichen Vorgehen
+
+**Nicht** geschrieben wird für:
+
+- Implementierungsdetails einzelner Dateien, Bugfixes, Umbenennungen
+- Vorübergehende Workarounds (dafür `# TODO` oder `PROGRESS.md`)
+- Modulinterne Entscheidungen ohne Wirkung auf andere Module
+
+---
+
+> Historischer Hinweis: Diese Datei entstand am 2026-06-30; die ersten 13 ADRs sind eine **nachträgliche Aufarbeitung** bereits bestehender Entscheidungen, das Datum entspricht dem jeweils relevantesten Code-Merge. Spätere Entscheidungen werden zum Zeitpunkt ihrer Festlegung erfasst.

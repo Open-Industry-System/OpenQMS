@@ -1,36 +1,36 @@
-# Agent 任务私有附件操作指南
+# Betriebsanleitung für private Anhänge von Agent-Aufgaben
 
-## 范围与默认状态
+## Umfang und Standardzustand
 
-R4b-2 附件默认关闭：`AGENT_TASK_RUNTIME_ENABLED` 和
-`AGENT_TASK_ATTACHMENTS_ENABLED` 必须同时为 true，且必须配置由服务身份拥有、
-0700 的绝对私有 `AGENT_TASK_ATTACHMENT_STORAGE_ROOT` 和健康的 ClamAV host/port。
-缺任一项即失败关闭；关闭在租户解析、认证、multipart 读取、数据库和扫描器连接前返回 404。
+Anhänge aus R4b-2 sind standardmäßig deaktiviert: `AGENT_TASK_RUNTIME_ENABLED` und
+`AGENT_TASK_ATTACHMENTS_ENABLED` müssen beide true sein, und es müssen ein absolutes privates
+`AGENT_TASK_ATTACHMENT_STORAGE_ROOT` (Eigentümer ist die Dienstidentität, Modus 0700) sowie ein funktionsfähiger ClamAV host/port konfiguriert sein.
+Fehlt etwas, wird geschlossen abgelehnt; im deaktivierten Zustand wird vor Mandantenauflösung, Authentifizierung, multipart-Lesen, Datenbank- und Scannerverbindung 404 geliefert.
 
-该实现仅限单节点私有卷。clean/staging/runtime 卷不与 ClamAV 或插件共享；scanner 没有宿主机端口。`AGENT_TASK_ATTACHMENT_STORAGE_ROOT` 不能位于任何由本应用实际 `StaticFiles` 挂载的目录之内，也不能包含静态挂载目录；部署运维必须保证该根目录没有被反向代理、静态站点或其他公开文件服务挂载。
-生产对象存储、预签名 URL、S3/MinIO、多副本共享存储及生产启用均**尚未获批**。
+Die Umsetzung ist auf private Volumes eines einzelnen Knotens beschränkt. clean-/staging-/runtime-Volumes werden nicht mit ClamAV oder Plugins geteilt; der Scanner hat keinen Host-Port. `AGENT_TASK_ATTACHMENT_STORAGE_ROOT` darf weder innerhalb eines tatsächlich von der Anwendung per `StaticFiles` eingehängten Verzeichnisses liegen noch ein solches enthalten; der Betrieb muss sicherstellen, dass dieses Wurzelverzeichnis von keinem Reverse-Proxy, statischen Webserver oder anderen öffentlichen Dateidienst eingebunden wird.
+Produktiver Objektspeicher, vorsignierte URLs, S3/MinIO, gemeinsamer Speicher für mehrere Replikate und eine Aktivierung in der Produktion sind **noch nicht freigegeben**.
 
-## 限制和数据边界
+## Grenzen und Datengrenzen
 
-- 每文件最大 20 MiB；同任务最多 5 个 `scanning`、`promoting` 或 `available` 附件；同一租户用户跨任务最多 5 个未过期 `scanning` 或 `promoting` 上传；保留期 168 小时。
-- 只允许 `.pdf`、`.png`、`.jpg`、`.jpeg`、`.txt`、`.csv`、`.docx`、`.xlsx`；扩展名不是安全结论。
-- 只有扫描完成且状态为 `available` 的文件可通过受权后端流下载。响应固定为 attachment、octet-stream、nosniff、no-store。
-- 文件、路径、存储键、下载 URL、解析结果和字节绝不发送给插件、模型、worker、消息、结果、检查点或浏览器持久化。
-- 前端不预览、不读内容、不用 FileReader；唯一例外是用户于 2026-10-18 明确批准的、认证下载时创建一次 Blob URL 以立即触发下载，随后移除 anchor 并 revoke，绝不持久化或复用。
+- Höchstens 20 MiB pro Datei; pro Aufgabe höchstens 5 Anhänge in `scanning`, `promoting` oder `available`; pro Mandantenbenutzer aufgabenübergreifend höchstens 5 nicht abgelaufene Uploads in `scanning` oder `promoting`; Aufbewahrung 168 Stunden.
+- Erlaubt sind nur `.pdf`, `.png`, `.jpg`, `.jpeg`, `.txt`, `.csv`, `.docx`, `.xlsx`; die Dateiendung ist keine Sicherheitsaussage.
+- Nur fertig gescannte Dateien im Status `available` können über einen berechtigten Backend-Stream heruntergeladen werden. Die Antwort ist fest attachment, octet-stream, nosniff, no-store.
+- Dateien, Pfade, Speicherschlüssel, Download-URLs, Parse-Ergebnisse und Bytes werden nie an Plugins, Modelle, Worker, Nachrichten, Ergebnisse, Checkpoints oder Browserspeicher gegeben.
+- Das Frontend zeigt keine Vorschau, liest keine Inhalte und nutzt kein FileReader; einzige, vom Benutzer am 2026-10-18 ausdrücklich genehmigte Ausnahme ist eine einmalige Blob-URL beim authentifizierten Download, um den Download sofort auszulösen; danach werden Anker entfernt und die URL widerrufen, nie gespeichert oder wiederverwendet.
 
-## 扫描、故障和维护
+## Scannen, Fehler und Wartung
 
-受控 profile 使用 `clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c`。
-`docker/clamav/clamd.conf` 固定 20 MiB 流/文件/扫描限制、加密和超限告警、单线程/队列。验收必须记录 daemon/definitions 版本，并以真实 `VERSIONCOMMANDS` 与 EICAR `FOUND` 证明，不得以 always-clean fake 代替。
+Das kontrollierte Profil verwendet `clamav/clamav:1.4.3_base@sha256:be37f82c9cccf6c2559a44b8fb537e6f11e8547b37988650b169c4540c2f298c`.
+`docker/clamav/clamd.conf` legt Grenzen von 20 MiB für Stream/Datei/Scan, Warnungen bei Verschlüsselung und Überschreitung sowie Einzelthread/Queue fest. Die Abnahme muss Daemon- und Signaturversion erfassen und mit echtem `VERSIONCOMMANDS` und EICAR `FOUND` belegt werden; ein immer sauber meldender Fake ist kein Ersatz.
 
-上传先提交用户/任务配额预留，再在私有 staging 中完整接收有大小和期限限制的字节。客户端流接收期间不占用全局 scanner 槽；完整 staging 描述符回卷后才申请该槽，并从本地文件发送 ClamAV。槽忙时返回 `503 ATTACHMENT_CAPACITY_BUSY`，清理 staging 并释放配额；不保留无界扫描队列。对账与新 staging 文件创建通过独立的短元数据锁协调，不锁住未过期上传流；到期回收后的上传即使恢复传输也不能重新发布。
+Ein Upload committet zuerst die Kontingentreservierung für Benutzer/Aufgabe und empfängt dann im privaten Staging die vollständigen Bytes mit Größen- und Zeitgrenzen. Während des Empfangs vom Client wird kein globaler Scanner-Slot belegt; erst nachdem der vollständige Staging-Deskriptor zurückgespult ist, wird der Slot angefordert und von der lokalen Datei an ClamAV gesendet. Ist der Slot belegt, folgt `503 ATTACHMENT_CAPACITY_BUSY`, Staging wird bereinigt und das Kontingent freigegeben; es gibt keine unbegrenzte Scan-Warteschlange. Abgleich und Anlage neuer Staging-Dateien werden über eine eigene kurze Metadatensperre koordiniert, die nicht abgelaufene Upload-Streams nicht sperrt; ein nach Ablauf zurückgewonnener Upload kann auch bei wieder aufgenommener Übertragung nicht mehr veröffentlicht werden.
 
-EICAR、加密或超限启发式命中为 `422 ATTACHMENT_MALWARE_REJECTED`；scanner 超时、不可达或协议错误为 `503 ATTACHMENT_SCANNER_UNAVAILABLE`。两者删除 staging、保留最小失败记录以追踪，且没有可下载对象。权限/任务/坐标变化拒绝或撤回访问；列表、下载、删除和提升均重新核验当前事实。下载在 clean 文件完整性校验后，再次读取当前身份、权限和目标绑定，并刷新附件状态、期限及存储/内容标识；并发撤权、目标重绑、过期或元数据变化时不交付描述符。最终检查、审计提交失败或请求取消时关闭已打开文件，审计提交异常还回滚未完成事务，避免后续误记成功下载。
+Treffer bei EICAR, Verschlüsselung oder Überschreitungsheuristiken ergeben `422 ATTACHMENT_MALWARE_REJECTED`; Timeout, Nichterreichbarkeit oder Protokollfehler des Scanners ergeben `503 ATTACHMENT_SCANNER_UNAVAILABLE`. In beiden Fällen wird Staging gelöscht, ein minimaler Fehlschlagdatensatz zur Nachverfolgung bleibt erhalten, es gibt kein herunterladbares Objekt. Änderungen an Berechtigung/Aufgabe/Koordinaten führen zu Ablehnung oder Entzug des Zugriffs; Liste, Download, Löschen und Freigabe prüfen jeweils aktuelle Fakten erneut. Der Download liest nach der Integritätsprüfung der clean-Datei erneut aktuelle Identität, Berechtigung und Zielbindung und aktualisiert Anhangsstatus, Frist sowie Speicher-/Inhaltskennungen; bei parallelem Rechteentzug, Neubindung des Ziels, Ablauf oder Metadatenänderung wird kein Deskriptor ausgeliefert. Schlägt die abschließende Prüfung oder der Audit-Commit fehl oder wird die Anfrage abgebrochen, wird die geöffnete Datei geschlossen; bei Fehlern im Audit-Commit wird zudem die offene Transaktion zurückgerollt, damit kein Download fälschlich als erfolgreich erfasst wird.
 
-对账仅清理已有记录所属的 live namespace 中可证明安全的遗留 staging/状态转换；普通 maintenance、failed/suspended/deactivated 或 generation 改变必须保留未过期字节。`expires_at <= now` 的记录在列表中立即不可见，即使清理尚未运行；对账以 `available -> purging` 的已提交状态后删除 clean 字节，再提交 `purged` 和系统审计。历史 generation 中有持久化记录的已过期对象可按该记录清理，未知历史 namespace 则只保留并告警。整代删除只能有平台 `tenant_attachment_storage_disposals` 的精确、已提交 `test_rebuild`（或未来 `tenant_destroyed`）授权；每个 disposal 是 append-only 记录。过期和用户删除均经 `purging -> purged` 两阶段，不能硬删除记录。
+Der Abgleich bereinigt nur nachweislich sichere Staging-Reste und Statusübergänge in live-Namespaces bestehender Datensätze; normale Wartung, failed/suspended/deactivated oder eine geänderte Generation müssen nicht abgelaufene Bytes erhalten. Datensätze mit `expires_at <= now` sind in Listen sofort unsichtbar, auch wenn die Bereinigung noch nicht gelaufen ist; der Abgleich löscht clean-Bytes nach dem committeten Status `available -> purging` und committet dann `purged` samt Systemaudit. Abgelaufene Objekte mit persistiertem Datensatz in einer historischen Generation können anhand dieses Datensatzes bereinigt werden, unbekannte historische Namespaces werden nur aufbewahrt und gemeldet. Das Löschen einer ganzen Generation erfordert eine exakte, committete Autorisierung `test_rebuild` (oder künftig `tenant_destroyed`) in der Plattformtabelle `tenant_attachment_storage_disposals`; jeder disposal ist ein append-only-Datensatz. Ablauf und Löschen durch Benutzer laufen zweistufig über `purging -> purged`; Datensätze werden nie hart gelöscht.
 
-## 实际验收和资源处置
+## Echte Abnahme und Ressourcenentsorgung
 
-运行 `make agent-attachment-e2e`。它创建随机 Compose project、专用数据库、storage/runtime/definitions named volumes；ClamAV 仅在 Compose 网络中。浏览器 bridge 仅发布 `127.0.0.1:8008` backend HTTP，主机 Playwright 使用已安装 Chromium；绝不发布 scanner。目标先跑真实 API/ClamAV 过程测试，再跑真实登录、default-off、clean 保存下载字节、EICAR、scanner unavailable、撤权和关闭清理的浏览器测试。无论成功或失败，trap 只删除该随机 project 的容器和 volumes；不触碰共享开发、生产或 parent-owned 容器/目录。
+`make agent-attachment-e2e` ausführen. Es legt ein zufälliges Compose-Projekt, eine eigene Datenbank sowie benannte Volumes für storage/runtime/definitions an; ClamAV ist nur im Compose-Netz erreichbar. Die Browser-Bridge veröffentlicht nur `127.0.0.1:8008` für Backend-HTTP, Playwright auf dem Host nutzt das installierte Chromium; der Scanner wird nie veröffentlicht. Zuerst laufen echte API-/ClamAV-Prozesstests, dann Browsertests mit echter Anmeldung, default-off, Speichern und Herunterladen sauberer Bytes, EICAR, nicht verfügbarem Scanner, Rechteentzug und Bereinigung beim Schließen. Unabhängig von Erfolg oder Fehlschlag entfernt ein trap nur Container und Volumes dieses zufälligen Projekts; gemeinsame Entwicklungs-, Produktions- oder vom Elternprozess verwaltete Container/Verzeichnisse bleiben unberührt.
 
-验收结束应记录命令、exit code、镜像 digest、scanner/definitions 版本和清理结果。任何生产存储、重扫策略、tenant destruction 或多节点设计须独立评审。
+Nach der Abnahme werden Befehl, Exit-Code, Image-Digest, Scanner-/Signaturversion und Bereinigungsergebnis erfasst. Produktivspeicher, erneute Scan-Strategien, Mandantenzerstörung oder Mehrknoten-Designs brauchen ein eigenes Review.

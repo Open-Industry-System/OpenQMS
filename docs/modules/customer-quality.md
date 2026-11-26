@@ -1,27 +1,27 @@
-# 客户质量管理模块 — 用户手册
+# Modul Kundenqualität — Benutzerhandbuch
 
-> 最后更新: 2026-06-13 | 适用版本: OpenQMS v1.0
+> Zuletzt aktualisiert: 2026-06-13 | Gilt für: OpenQMS v1.0
 
 ---
 
-## 1. 功能概述
+## 1. Funktionsüberblick
 
-客户质量管理模块覆盖从客户投诉受理到供应商纠正措施 (SCAR) 的全流程闭环管理，包含以下四个子模块：
+Das Modul Kundenqualität deckt den geschlossenen Gesamtablauf von der Annahme einer Kundenreklamation bis zur Lieferanten-Korrekturmaßnahme (SCAR) ab und umfasst vier Teilmodule:
 
-| 子模块 | 路由 | 功能范围 |
+| Teilmodul | Route | Funktionsumfang |
 |--------|------|----------|
-| 客诉管理 | `/customer-quality`, `/customer-quality/complaints/:id` | 客户投诉登记、调查、回复、关闭 |
-| RMA 退货管理 | `/customer-quality`, `/customer-quality/rma/:id` | 退货接收、缺陷分析、责任判定、关闭 |
-| 客户审核 | `/customer-audits`, `/customer-audits/:id` | 客户审核计划、发现项跟踪、客户确认 |
-| SCAR 供应商纠正措施 | `/scars`, `/scars/:id` | 从客诉/RMA/IQC 不良发起 SCAR，跟踪供应商整改 |
+| Reklamationsmanagement | `/customer-quality`, `/customer-quality/complaints/:id` | Erfassung, Untersuchung, Antwort und Abschluss von Kundenreklamationen |
+| RMA – Rücksendungen | `/customer-quality`, `/customer-quality/rma/:id` | Rücksendeeingang, Fehleranalyse, Verantwortungszuordnung, Abschluss |
+| Kundenaudits | `/customer-audits`, `/customer-audits/:id` | Kundenauditplanung, Verfolgung von Feststellungen, Kundenbestätigung |
+| SCAR – Lieferanten-Korrekturmaßnahmen | `/scars`, `/scars/:id` | SCAR aus Reklamation/RMA/IQC-Fehler auslösen, Korrekturen des Lieferanten verfolgen |
 
-这四个子模块通过数据关联实现端到端追溯：客诉可关联 RMA、FMEA、CAPA；RMA 可关联客诉、FMEA、CAPA；SCAR 可从客诉或 RMA 一键发起；客户审核发现项可关联 CAPA。
+Die vier Teilmodule sind über Datenverknüpfungen durchgängig rückverfolgbar: Reklamationen lassen sich mit RMA, FMEA und CAPA verknüpfen; RMAs mit Reklamationen, FMEA und CAPA; SCAR kann per Klick aus Reklamation oder RMA ausgelöst werden; Feststellungen aus Kundenaudits lassen sich mit CAPA verknüpfen.
 
 ---
 
-## 2. 适用角色与权限
+## 2. Rollen und Berechtigungen
 
-权限模型采用 **ModuleKey × PermissionLevel × 角色** 三级结构。PermissionLevel 含义：0 = NONE（不可见）、1 = VIEW（只读）、2 = CREATE（可新建）、3 = EDIT（可编辑）、4 = APPROVE（可审批/关闭）、5 = ADMIN（完全控制）。
+Das Berechtigungsmodell ist dreistufig: **ModuleKey × PermissionLevel × Rolle**. Bedeutung von PermissionLevel: 0 = NONE (unsichtbar), 1 = VIEW (nur lesen), 2 = CREATE (anlegen), 3 = EDIT (bearbeiten), 4 = APPROVE (freigeben/abschließen), 5 = ADMIN (Vollzugriff).
 
 | ModuleKey | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
 |-----------|:-----:|:-------:|:--------:|:-----------:|:-----------:|:-----------:|:------:|
@@ -29,79 +29,79 @@
 | customer_audit | 5 | 4 | 1 | 1 | 0 | 3 | 1 |
 | scar | 5 | 4 | 1 | 1 | 3 | 1 | 1 |
 
-**操作与最低权限对照：**
+**Operationen und Mindestberechtigung:**
 
-| 操作 | 所需 PermissionLevel |
+| Operation | Erforderliche PermissionLevel |
 |------|----------------------|
-| 查看列表/详情 | VIEW (1) |
-| 新建/编辑/状态流转 | CREATE (2) |
-| 关闭客诉/关闭 RMA | APPROVE (4) |
-| SCAR 验证 (verify) / 关闭 (close) | APPROVE (4) |
-| SCAR 开始 (start) / 回复 (respond) | CREATE (2) |
+| Liste/Details ansehen | VIEW (1) |
+| Anlegen/Bearbeiten/Statusübergang | CREATE (2) |
+| Reklamation abschließen / RMA abschließen | APPROVE (4) |
+| SCAR verifizieren (verify) / abschließen (close) | APPROVE (4) |
+| SCAR starten (start) / beantworten (respond) | CREATE (2) |
 
-> 注意：`supplier_qe` 角色对 `customer_quality` 和 `customer_audit` 模块权限为 NONE (0)，即看不到这两个模块的菜单和数据；`customer_qe` 对 `scar` 仅有 VIEW 权限，无法直接操作 SCAR。
+> Hinweis: Die Rolle `supplier_qe` hat für die Module `customer_quality` und `customer_audit` die Stufe NONE (0) und sieht deren Menüs und Daten nicht; `customer_qe` hat für `scar` nur VIEW und kann SCARs nicht direkt bearbeiten.
 
 ---
 
-## 3. 客诉管理
+## 3. Reklamationsmanagement
 
-### 3.1 客诉列表
+### 3.1 Reklamationsliste
 
-**路由：** `/customer-quality`（Tab: 客诉）
+**Route:** `/customer-quality` (Reiter: Reklamationen)
 
-列表页支持以下筛选条件：
+Die Liste unterstützt folgende Filter:
 
-- 产品线 (`product_line`)
-- 客户 (`customer_id`)
-- 状态 (`status`)
-- 严重度 (`severity`)
-- 是否逾期 (`overdue`)
-- 负责人 (`assignee_id`)
+- Produktlinie (`product_line`)
+- Kunde (`customer_id`)
+- Status (`status`)
+- Schwere (`severity`)
+- Überfällig (`overdue`)
+- Verantwortliche Person (`assignee_id`)
 
-列表返回字段：`complaint_no`、客户名称、产品线、严重度、类别、状态、逾期标记、创建时间。
+Gelieferte Felder: `complaint_no`, Kundenname, Produktlinie, Schwere, Kategorie, Status, Überfälligkeitskennzeichen, Erstellzeit.
 
-### 3.2 新建客诉
+### 3.2 Reklamation anlegen
 
 **API：** `POST /api/customer-complaints`
 
-必填字段：
+Pflichtfelder:
 
-| 字段 | 说明 | 取值 |
+| Feld | Beschreibung | Wert |
 |------|------|------|
-| `complaint_no` | 客诉编号（全局唯一） | 自定义编号，如 `CP-2026-001` |
-| `product_line_code` | 产品线 | 系统已有产品线编码 |
-| `customer_id` | 客户 | 关联 `customers` 表 |
-| `category` | 缺陷类别 | `safety`（安全）、`function`（功能）、`appearance`（外观）、`delivery`（交付） |
-| `severity` | 严重度 | `致命`、`严重`、`一般`、`轻微` |
-| `defect_desc` | 缺陷描述 | 自由文本 |
-| `received_date` | 接收日期 | 日期 |
+| `complaint_no` | Reklamationsnummer (global eindeutig) | Eigene Nummer, z. B. `CP-2026-001` |
+| `product_line_code` | Produktlinie | Vorhandener Produktliniencode |
+| `customer_id` | Kunde | Verknüpft mit Tabelle `customers` |
+| `category` | Fehlerkategorie | `safety` (Sicherheit), `function` (Funktion), `appearance` (Aussehen), `delivery` (Lieferung) |
+| `severity` | Schwere | Vier gespeicherte Schwerestufen (Altwerte in der Datenbank), angezeigt als kritisch, schwer, mittel, gering |
+| `defect_desc` | Fehlerbeschreibung | Freitext |
+| `received_date` | Eingangsdatum | Datum |
 
-选填字段：
+Optionale Felder:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `product_id` | 产品编号 |
-| `batch_no` | 批次号 |
-| `serial_number` | 序列号 |
-| `impact_qty` | 影响数量，默认 0 |
-| `occurred_date` | 发生日期 |
-| `due_date` | 截止日期 |
-| `fmea_ref_id` | 关联 FMEA 文档 |
-| `capa_ref_id` | 关联 8D/CAPA |
-| `assignee_id` | 负责人 |
-| `preliminary_response` | 初步回复 |
-| `root_cause` | 根本原因 |
-| `corrective_action` | 纠正措施 |
-| `attachments` | 附件列表 (JSONB) |
-| `supplier_responsibility` | 是否判定供应商责任，默认 false |
-| `supplier_id` | 责任供应商 |
-| `scar_ref_id` | 关联 SCAR |
+| `product_id` | Produktnummer |
+| `batch_no` | Chargennummer |
+| `serial_number` | Seriennummer |
+| `impact_qty` | Betroffene Menge, Standard 0 |
+| `occurred_date` | Auftretensdatum |
+| `due_date` | Fälligkeitsdatum |
+| `fmea_ref_id` | Verknüpftes FMEA-Dokument |
+| `capa_ref_id` | Verknüpfter 8D/CAPA-Bericht |
+| `assignee_id` | Verantwortliche Person |
+| `preliminary_response` | Erste Antwort |
+| `root_cause` | Grundursache |
+| `corrective_action` | Korrekturmaßnahme |
+| `attachments` | Anhangsliste (JSONB) |
+| `supplier_responsibility` | Lieferantenverantwortung festgestellt, Standard false |
+| `supplier_id` | Verantwortlicher Lieferant |
+| `scar_ref_id` | Verknüpfte SCAR |
 
-> `status` 默认为 `open`。创建时不能指定 `closed` 或 `cancelled`。
+> `status` ist standardmäßig `open`. Beim Anlegen können `closed` oder `cancelled` nicht gesetzt werden.
 
-### 3.3 客诉状态流转
+### 3.3 Statusübergänge der Reklamation
 
-客诉遵循以下状态机：
+Reklamationen folgen diesem Zustandsautomaten:
 
 ```
 open ──start_investigation──▶ investigating
@@ -111,7 +111,7 @@ open / investigating ──cancel──▶ cancelled
 responded ──start_investigation──▶ investigating
 ```
 
-| 当前状态 | 操作 | 目标状态 | 最低权限 | API |
+| Aktueller Status | Operation | Zielstatus | Mindestberechtigung | API |
 |----------|------|----------|----------|-----|
 | open | start_investigation | investigating | CREATE | `POST /api/customer-complaints/{id}/start-investigation` |
 | investigating | mark_responded | responded | CREATE | `POST /api/customer-complaints/{id}/mark-responded` |
@@ -119,76 +119,76 @@ responded ──start_investigation──▶ investigating
 | open / investigating | cancel | cancelled | CREATE | `POST /api/customer-complaints/{id}/cancel` |
 | responded | start_investigation | investigating | CREATE | `POST /api/customer-complaints/{id}/start-investigation` |
 
-关闭客诉时，系统自动记录 `closed_at` 时间戳。
+Beim Abschluss einer Reklamation erfasst das System automatisch den Zeitstempel `closed_at`.
 
-### 3.4 关联操作
+### 3.4 Verknüpfungen
 
-| 操作 | API | 说明 |
+| Operation | API | Beschreibung |
 |------|-----|------|
-| 关联 CAPA | `POST /api/customer-complaints/{id}/link-capa?capa_ref_id=…` | 将已有 8D/CAPA 报告关联到客诉 |
-| 从客诉创建 CAPA | `POST /api/customer-complaints/{id}/create-capa?document_no=…` | 自动创建 8D 报告，并关联到客诉；客诉状态变为 `investigating` |
-| 关联 FMEA | `POST /api/customer-complaints/{id}/link-fmea?fmea_ref_id=…` | 将 FMEA 文档关联到客诉 |
-| 从客诉创建 SCAR | `POST /api/customer-complaints/{id}/create-scar` | 前提：`supplier_responsibility=true` 且尚未关联 SCAR |
+| CAPA verknüpfen | `POST /api/customer-complaints/{id}/link-capa?capa_ref_id=…` | Bestehenden 8D/CAPA-Bericht mit der Reklamation verknüpfen |
+| CAPA aus Reklamation anlegen | `POST /api/customer-complaints/{id}/create-capa?document_no=…` | Legt automatisch einen 8D-Bericht an und verknüpft ihn; die Reklamation wechselt auf `investigating` |
+| FMEA verknüpfen | `POST /api/customer-complaints/{id}/link-fmea?fmea_ref_id=…` | FMEA-Dokument mit der Reklamation verknüpfen |
+| SCAR aus Reklamation anlegen | `POST /api/customer-complaints/{id}/create-scar` | Voraussetzung: `supplier_responsibility=true` und noch keine SCAR verknüpft |
 
-### 3.5 客诉编辑限制
+### 3.5 Einschränkungen beim Bearbeiten
 
-- 当客诉已关联 RMA 记录时，不可更改客户 (`customer_id`) 和产品线 (`product_line_code`)。
-- 编辑 `status` 字段时，仅允许合法的状态转移路径；`closed` 和 `cancelled` 必须通过 transition 端点操作。
-- 严重度 (`severity`) 和类别 (`category`) 的取值必须符合预定义枚举。
+- Ist eine Reklamation bereits mit RMA-Datensätzen verknüpft, können Kunde (`customer_id`) und Produktlinie (`product_line_code`) nicht geändert werden.
+- Beim Bearbeiten von `status` sind nur gültige Übergänge erlaubt; `closed` und `cancelled` müssen über den transition-Endpunkt gesetzt werden.
+- Schwere (`severity`) und Kategorie (`category`) müssen den vordefinierten Enums entsprechen.
 
-### 3.6 逾期判定
+### 3.6 Überfälligkeit
 
-客诉的逾期状态由 `due_date` 和 `status` 决定：
+Die Überfälligkeit einer Reklamation ergibt sich aus `due_date` und `status`:
 
-- `due_date < 今天` 且状态不是 `closed` 或 `cancelled` → 逾期
-- `due_date` 为空或状态为终态 → 不逾期
+- `due_date < heute` und Status weder `closed` noch `cancelled` → überfällig
+- `due_date` leer oder Endstatus → nicht überfällig
 
 ---
 
-## 4. RMA 退货管理
+## 4. RMA – Rücksendungen
 
-### 4.1 RMA 列表
+### 4.1 RMA-Liste
 
-**路由：** `/customer-quality`（Tab: RMA）
+**Route:** `/customer-quality` (Reiter: RMA)
 
-筛选条件：产品线、客户、关联客诉、状态、责任方、负责人。
+Filter: Produktlinie, Kunde, verknüpfte Reklamation, Status, Verantwortlicher, verantwortliche Person.
 
-### 4.2 新建 RMA
+### 4.2 RMA anlegen
 
 **API：** `POST /api/rma-records`
 
-必填字段：
+Pflichtfelder:
 
-| 字段 | 说明 | 取值 |
+| Feld | Beschreibung | Wert |
 |------|------|------|
-| `rma_no` | RMA 编号（全局唯一） | 自定义编号 |
-| `product_line_code` | 产品线 | 系统已有产品线编码 |
-| `customer_id` | 客户 | 关联 `customers` 表 |
-| `return_qty` | 退货数量 | 正整数 |
-| `defect_type` | 缺陷类型 | 自由文本 |
+| `rma_no` | RMA-Nummer (global eindeutig) | Eigene Nummer |
+| `product_line_code` | Produktlinie | Vorhandener Produktliniencode |
+| `customer_id` | Kunde | Verknüpft mit Tabelle `customers` |
+| `return_qty` | Rücksendemenge | Positive ganze Zahl |
+| `defect_type` | Fehlerart | Freitext |
 
-选填字段：
+Optionale Felder:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `complaint_id` | 关联客诉（如有关联） |
-| `product_id` | 产品编号 |
-| `batch_no` | 批次号 |
-| `serial_number` | 序列号 |
-| `responsibility` | 责任判定：`supplier`、`internal`、`transport`、`customer_misuse`、`unknown` |
-| `analysis_result` | 分析结果 |
-| `corrective_action` | 纠正措施 |
-| `fmea_ref_id` | 关联 FMEA |
-| `capa_ref_id` | 关联 8D/CAPA |
-| `scar_ref_id` | 关联 SCAR |
-| `attachments` | 附件列表 (JSONB) |
-| `assignee_id` | 负责人 |
-| `tracking_number` | 物流追踪号 |
-| `received_date` | 收货日期 |
+| `complaint_id` | Verknüpfte Reklamation (falls vorhanden) |
+| `product_id` | Produktnummer |
+| `batch_no` | Chargennummer |
+| `serial_number` | Seriennummer |
+| `responsibility` | Verantwortung: `supplier`, `internal`, `transport`, `customer_misuse`, `unknown` |
+| `analysis_result` | Analyseergebnis |
+| `corrective_action` | Korrekturmaßnahme |
+| `fmea_ref_id` | FMEA verknüpfen |
+| `capa_ref_id` | Verknüpfter 8D/CAPA-Bericht |
+| `scar_ref_id` | Verknüpfte SCAR |
+| `attachments` | Anhangsliste (JSONB) |
+| `assignee_id` | Verantwortliche Person |
+| `tracking_number` | Sendungsnummer |
+| `received_date` | Wareneingangsdatum |
 
-> 若 `complaint_id` 非空，系统校验 RMA 的 `customer_id` 和 `product_line_code` 必须与关联客诉一致，否则返回错误。新建 RMA 时，若关联了客诉，系统自动将客诉的 `has_rma` 标记为 `true`。
+> Ist `complaint_id` gesetzt, prüft das System, dass `customer_id` und `product_line_code` der RMA mit der verknüpften Reklamation übereinstimmen, sonst wird ein Fehler geliefert. Beim Anlegen einer RMA mit verknüpfter Reklamation setzt das System `has_rma` der Reklamation automatisch auf `true`.
 
-### 4.3 RMA 状态流转
+### 4.3 Statusübergänge der RMA
 
 ```
 open ──start_analysis──▶ analysis
@@ -197,174 +197,174 @@ action_pending ──close──▶ closed
 open / analysis ──cancel──▶ cancelled
 ```
 
-| 当前状态 | 操作 | 目标状态 | 最低权限 | API |
+| Aktueller Status | Operation | Zielstatus | Mindestberechtigung | API |
 |----------|------|----------|----------|-----|
 | open | start_analysis | analysis | CREATE | `POST /api/rma-records/{id}/start-analysis` |
 | analysis | mark_action_pending | action_pending | CREATE | `POST /api/rma-records/{id}/mark-action-pending` |
 | action_pending | close | closed | APPROVE | `POST /api/rma-records/{id}/close` |
 | open / analysis | cancel | cancelled | CREATE | `POST /api/rma-records/{id}/cancel` |
 
-关闭 RMA 时，系统自动记录 `closed_at` 时间戳。
+Beim Abschluss einer RMA erfasst das System automatisch den Zeitstempel `closed_at`.
 
-### 4.4 责任判定
+### 4.4 Verantwortungszuordnung
 
-RMA 的 `responsibility` 字段用于记录退货责任归属：
+Das Feld `responsibility` der RMA hält fest, wem die Rücksendung zuzurechnen ist:
 
-| 值 | 中文含义 | 后续影响 |
+| Wert | Bedeutung | Folgen |
 |----|----------|----------|
-| `supplier` | 供应商 | 可从该 RMA 直接创建 SCAR |
-| `internal` | 内部 | 内部整改 |
-| `transport` | 运输 | 物流索赔 |
-| `customer_misuse` | 客户误用 | 拒赔/说明 |
-| `unknown` | 待定 | 继续调查 |
+| `supplier` | Lieferant | SCAR direkt aus dieser RMA anlegbar |
+| `internal` | Intern | Interne Korrektur |
+| `transport` | Transport | Transportschadenreklamation |
+| `customer_misuse` | Fehlgebrauch durch Kunden | Ablehnung/Erläuterung |
+| `unknown` | Offen | Weitere Untersuchung |
 
-### 4.5 关联操作
+### 4.5 Verknüpfungen
 
-| 操作 | API | 说明 |
+| Operation | API | Beschreibung |
 |------|-----|------|
-| 关联客诉 | `POST /api/rma-records/{id}/link-complaint?complaint_id=…` | 校验客户和产品线一致性 |
-| 关联 CAPA | `POST /api/rma-records/{id}/link-capa?capa_ref_id=…` | 关联 8D/CAPA |
-| 关联 FMEA | `POST /api/rma-records/{id}/link-fmea?fmea_ref_id=…` | 关联 FMEA |
-| 从 RMA 创建 SCAR | `POST /api/rma-records/{id}/create-scar` | 前提：`responsibility=supplier` 且尚未关联 SCAR |
+| Reklamation verknüpfen | `POST /api/rma-records/{id}/link-complaint?complaint_id=…` | Prüft Übereinstimmung von Kunde und Produktlinie |
+| CAPA verknüpfen | `POST /api/rma-records/{id}/link-capa?capa_ref_id=…` | Verknüpfter 8D/CAPA-Bericht |
+| FMEA verknüpfen | `POST /api/rma-records/{id}/link-fmea?fmea_ref_id=…` | FMEA verknüpfen |
+| SCAR aus RMA anlegen | `POST /api/rma-records/{id}/create-scar` | Voraussetzung: `responsibility=supplier` und noch keine SCAR verknüpft |
 
-### 4.6 客诉与 RMA 联动
+### 4.6 Zusammenspiel von Reklamation und RMA
 
-- 关联客诉后，客诉的 `has_rma` 自动变为 `true`。
-- 取消关联（改为其他客诉）时，旧客诉如无其他 RMA 关联，`has_rma` 自动回退为 `false`。
-- 不可在有 RMA 关联时更改客诉的客户或产品线。
+- Nach der Verknüpfung wird `has_rma` der Reklamation automatisch `true`.
+- Wird die Verknüpfung aufgehoben (auf eine andere Reklamation geändert), fällt `has_rma` der alten Reklamation automatisch auf `false` zurück, sofern keine weitere RMA verknüpft ist.
+- Solange RMAs verknüpft sind, können Kunde und Produktlinie der Reklamation nicht geändert werden.
 
 ---
 
-## 5. 客户审核
+## 5. Kundenaudits
 
-### 5.1 审核列表
+### 5.1 Auditliste
 
-**路由：** `/customer-audits`
+**Route:** `/customer-audits`
 
-筛选条件：客户类型、审核方式、客户名称、状态、产品线。
+Filter: Kundentyp, Auditart, Kundenname, Status, Produktlinie.
 
-### 5.2 新建审核
+### 5.2 Audit anlegen
 
 **API：** `POST /api/audit-plans`
 
-必填字段：
+Pflichtfelder:
 
-| 字段 | 说明 | 取值 |
+| Feld | Beschreibung | Wert |
 |------|------|------|
-| `audit_scope` | 审核范围 | 自由文本 |
-| `audit_criteria` | 审核准则 | 自由文本 |
-| `planned_date` | 计划日期 | 日期 |
-| `customer_name` | 客户名称 | 自由文本 |
-| `customer_type` | 客户类型 | `OEM`、`Tier 1`、`Tier 2`、`其他` |
+| `audit_scope` | Auditumfang | Freitext |
+| `audit_criteria` | Auditkriterien | Freitext |
+| `planned_date` | Geplantes Datum | Datum |
+| `customer_name` | Kundenname | Freitext |
+| `customer_type` | Kundentyp | `OEM`, `Tier 1`, `Tier 2` sowie ein gespeicherter Altwert für „Sonstige“ |
 
-选填字段：
+Optionale Felder:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `audit_mode` | 审核方式：`on_site`（现场）、`remote`（远程） |
-| `lead_auditor` | 主审核员 |
-| `team_members` | 审核组成员 (JSONB) |
-| `checklist` | 审核检查表 (JSONB) |
-| `product_line_code` | 产品线 |
+| `audit_mode` | Auditart: `on_site` (vor Ort), `remote` (aus der Ferne) |
+| `lead_auditor` | Leitender Auditor |
+| `team_members` | Mitglieder des Auditteams (JSONB) |
+| `checklist` | Auditcheckliste (JSONB) |
+| `product_line_code` | Produktlinie |
 
-> 系统自动生成审核编号 (`plan_no`)，格式为 `CA-{年份}-{序号}`，如 `CA-2026-001`。系统同时自动创建或关联对应年度的客户审核方案 (`AuditProgram`)。
+> Das System erzeugt automatisch eine Auditnummer (`plan_no`) im Format `CA-{Jahr}-{Nummer}`, z. B. `CA-2026-001`, und legt das Kundenauditprogramm (`AuditProgram`) des Jahres automatisch an bzw. verknüpft es.
 
-### 5.3 审核状态
+### 5.3 Auditstatus
 
-客户审核使用 `AuditPlan` 模型，`audit_category` 固定为 `"customer"`，状态沿用审核模块状态机：
+Kundenaudits nutzen das Modell `AuditPlan` mit festem `audit_category` = `"customer"` und dem Zustandsautomaten des Auditmoduls:
 
-| 状态 | 说明 |
+| Status | Beschreibung |
 |------|------|
-| `planned` | 已计划 |
-| `in_progress` | 进行中 |
-| `completed` | 已完成 |
+| `planned` | Geplant |
+| `in_progress` | In Bearbeitung |
+| `completed` | Abgeschlossen |
 
-**完成审核条件：** 所有发现项必须已关闭 (`status=closed`) 且已获得客户确认 (`customer_confirmed=true`)。
+**Bedingung für den Abschluss:** Alle Feststellungen müssen geschlossen sein (`status=closed`) und vom Kunden bestätigt (`customer_confirmed=true`).
 
-### 5.4 发现项管理
+### 5.4 Feststellungen
 
-客户审核的发现项使用 `AuditFinding` 模型，额外包含客户确认字段：
+Feststellungen aus Kundenaudits verwenden das Modell `AuditFinding` mit zusätzlichen Feldern zur Kundenbestätigung:
 
-| 字段 | 类型 | 说明 |
+| Feld | Typ | Beschreibung |
 |------|------|------|
-| `customer_confirmed` | boolean | 客户是否确认，默认 false |
-| `customer_confirmation_date` | date | 客户确认日期 |
-| `customer_confirmation_attachments` | JSONB | 客户确认附件 |
+| `customer_confirmed` | boolean | Vom Kunden bestätigt, Standard false |
+| `customer_confirmation_date` | date | Datum der Kundenbestätigung |
+| `customer_confirmation_attachments` | JSONB | Anhänge der Kundenbestätigung |
 
-发现项状态流转：
+Statusübergänge der Feststellung:
 
 ```
 open ──start_progress──▶ in_progress ──close──▶ closed
 ```
 
-**关闭条件：**
-- 必须填写 `root_cause` 和 `corrective_action`
-- 如关联了 CAPA，CAPA 状态必须为 `D8_CLOSURE`
-- 客户审核发现项关闭时，`customer_confirmed` 必须为 `true`
+**Bedingungen für das Schließen:**
+- `root_cause` und `corrective_action` müssen ausgefüllt sein
+- Ist ein CAPA verknüpft, muss es den Status `D8_CLOSURE` haben
+- Beim Schließen von Kundenaudit-Feststellungen muss `customer_confirmed` `true` sein
 
-### 5.5 客户确认
+### 5.5 Kundenbestätigung
 
 **API：** `POST /api/audit-findings/{finding_id}/customer-confirm`
 
-客户端可独立确认发现项（不改变工作流状态），传入：
-- `confirmation_date`：确认日期
-- `attachments`：确认附件
+Kunden können Feststellungen unabhängig bestätigen (ohne den Workflow-Status zu ändern), mit:
+- `confirmation_date`: Bestätigungsdatum
+- `attachments`: Bestätigungsanhänge
 
-确认后 `customer_confirmed` 变为 `true`，记录确认日期和附件。
+Danach wird `customer_confirmed` `true`, Datum und Anhänge werden gespeichert.
 
-### 5.6 审核统计
+### 5.6 Auditstatistik
 
 **API：** `GET /api/audit-plans/customer-stats`
 
-返回统计信息：
+Gelieferte Kennzahlen:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `total_customer_audits` | 审核总数 |
-| `planned` | 计划中 |
-| `in_progress` | 进行中 |
-| `completed` | 已完成 |
-| `open_findings` | 未关闭发现项数 |
-| `major_nc_count` | 重大不符合项数 |
-| `customer_confirmed_count` | 已获客户确认数 |
-| `pending_confirmation_count` | 待客户确认数 |
+| `total_customer_audits` | Anzahl Audits |
+| `planned` | Geplant |
+| `in_progress` | In Bearbeitung |
+| `completed` | Abgeschlossen |
+| `open_findings` | Offene Feststellungen |
+| `major_nc_count` | Schwerwiegende Abweichungen |
+| `customer_confirmed_count` | Vom Kunden bestätigt |
+| `pending_confirmation_count` | Warten auf Kundenbestätigung |
 
 ---
 
-## 6. SCAR 供应商纠正措施
+## 6. SCAR – Lieferanten-Korrekturmaßnahmen
 
-### 6.1 SCAR 列表
+### 6.1 SCAR-Liste
 
-**路由：** `/scars`
+**Route:** `/scars`
 
-筛选条件：状态（支持多选逗号分隔）、供应商、来源类型 (`source_type`)。
+Filter: Status (Mehrfachauswahl, kommagetrennt), Lieferant, Quellart (`source_type`).
 
-### 6.2 新建 SCAR
+### 6.2 SCAR anlegen
 
 **API：** `POST /api/scars`
 
-必填字段：
+Pflichtfelder:
 
-| 字段 | 说明 | 取值 |
+| Feld | Beschreibung | Wert |
 |------|------|------|
-| `supplier_id` | 供应商 | 关联 `suppliers` 表 |
-| `source_type` | 来源类型 | `iqc`、`complaint`、`rma`、`manual` |
-| `description` | 问题描述 | 自由文本 |
+| `supplier_id` | Lieferant | Verknüpft mit Tabelle `suppliers` |
+| `source_type` | Quellart | `iqc`、`complaint`、`rma`、`manual` |
+| `description` | Problembeschreibung | Freitext |
 
-选填字段：
+Optionale Felder:
 
-| 字段 | 说明 |
+| Feld | Beschreibung |
 |------|------|
-| `source_id` | 来源 ID（IQC 检验 ID / 客诉 ID / RMA ID） |
-| `product_line_code` | 产品线 |
-| `requested_action` | 要求供应商采取的措施 |
-| `due_date` | 截止日期 |
+| `source_id` | Quell-ID (IQC-Prüfung / Reklamation / RMA) |
+| `product_line_code` | Produktlinie |
+| `requested_action` | Vom Lieferanten geforderte Maßnahmen |
+| `due_date` | Fälligkeitsdatum |
 
-> 系统自动生成 SCAR 编号，格式为 `SCAR-{YYMMDD}-{序号}`，如 `SCAR-260613-001`。状态默认为 `open`。
+> Das System erzeugt automatisch eine SCAR-Nummer im Format `SCAR-{YYMMDD}-{Nummer}`, z. B. `SCAR-260613-001`. Der Status ist standardmäßig `open`.
 
-### 6.3 SCAR 状态流转
+### 6.3 Statusübergänge der SCAR
 
-SCAR 采用 5 状态生命周期：
+SCAR hat einen Lebenszyklus mit 5 Status:
 
 ```
 open ──start──▶ in_progress ──respond──▶ responded
@@ -373,7 +373,7 @@ responded ──reject──▶ open
 verified ──reopen──▶ in_progress
 ```
 
-| 动作 | 当前状态 | 目标状态 | 最低权限 | 必填字段 |
+| Aktion | Aktueller Status | Zielstatus | Mindestberechtigung | Pflichtfelder |
 |------|----------|----------|----------|----------|
 | start | open | in_progress | CREATE (2) | — |
 | respond | in_progress | responded | CREATE (2) | `supplier_response` |
@@ -384,7 +384,7 @@ verified ──reopen──▶ in_progress
 
 **API：** `POST /api/scars/{id}/transition`
 
-请求体：
+Request-Body:
 ```json
 {
   "action": "start",
@@ -393,135 +393,135 @@ verified ──reopen──▶ in_progress
 }
 ```
 
-### 6.4 从客诉/RMA 创建 SCAR
+### 6.4 SCAR aus Reklamation/RMA anlegen
 
-除了直接创建 SCAR，还可从客诉或 RMA 一键发起：
+Neben dem direkten Anlegen kann eine SCAR per Klick aus Reklamation oder RMA ausgelöst werden:
 
-| 来源 | API | 前提条件 |
+| Quelle | API | Voraussetzung |
 |------|-----|-----------|
-| 客诉 | `POST /api/customer-complaints/{id}/create-scar` | `supplier_responsibility=true` 且 `scar_ref_id` 为空 |
-| RMA | `POST /api/rma-records/{id}/create-scar` | `responsibility=supplier` 且 `scar_ref_id` 为空 |
+| Reklamation | `POST /api/customer-complaints/{id}/create-scar` | `supplier_responsibility=true` und `scar_ref_id` leer |
+| RMA | `POST /api/rma-records/{id}/create-scar` | `responsibility=supplier` und `scar_ref_id` leer |
 
-从客诉发起时，系统自动将客诉的 `scar_ref_id` 回填为创建的 SCAR ID。从 RMA 发起时同理。
+Beim Auslösen aus einer Reklamation trägt das System die ID der neuen SCAR automatisch in `scar_ref_id` der Reklamation ein; für RMAs gilt dasselbe.
 
-创建请求体 (SCARRelatedCreate)：
+Request-Body (SCARRelatedCreate):
 
 ```json
 {
-  "supplier_id": "uuid",           // 必填（RMA 发起时无默认值，必须手动指定）
-  "description": "...",            // 可选，默认取客诉的 defect_desc 或 RMA 的 defect_type + analysis_result
-  "requested_action": "...",       // 可选
-  "due_date": "2026-07-31"         // 可选
+  "supplier_id": "uuid",           // Pflicht (bei RMA ohne Standardwert, muss angegeben werden)
+  "description": "...",            // Optional, Standard ist defect_desc der Reklamation bzw. der Wert der RMA defect_type + analysis_result
+  "requested_action": "...",       // Optional
+  "due_date": "2026-07-31"         // Optional
 }
 ```
 
-### 6.5 关联 CAPA
+### 6.5 CAPA verknüpfen
 
 **API：** `POST /api/scars/{id}/link-capa`
 
-请求体：`{ "capa_ref_id": "uuid" }`
+Request-Body: `{ "capa_ref_id": "uuid" }`
 
-将 8D/CAPA 报告关联到 SCAR，用于跟踪供应商整改效果。
+Verknüpft einen 8D/CAPA-Bericht mit der SCAR, um die Wirksamkeit der Lieferantenkorrektur zu verfolgen.
 
-### 6.6 SCAR 关闭与风险预警联动
+### 6.6 SCAR-Abschluss und Kopplung mit Risikowarnungen
 
-当 SCAR 状态变为 `closed` 时，系统自动将所有关联的未关闭供应商风险预警 (`SupplierRiskAlert`) 标记为已关闭。
+Wechselt eine SCAR auf `closed`, markiert das System alle verknüpften offenen Lieferanten-Risikowarnungen (`SupplierRiskAlert`) automatisch als geschlossen.
 
 ---
 
-## 7. 客户质量看板
+## 7. Dashboard Kundenqualität
 
 **API：** `GET /api/customer-quality/dashboard`
 
-看板提供以下维度的数据：
+Das Dashboard liefert Daten zu folgenden Dimensionen:
 
-| 指标 | 说明 |
+| Kennzahl | Beschreibung |
 |------|------|
-| 客诉总数 / 开放客诉数 / 逾期数 | 按时间窗口统计 |
-| RMA 总数 / 退货总量 / 独立退货量 | 独立退货量 = 不关联客诉的 RMA 退货数 |
-| 影响数量 (impact_qty) | 所有客诉的影响数量之和 |
-| PPM | (影响数量 + 独立退货量) / 出货量 × 1,000,000 |
-| 风险灯号 | red/yellow/green，基于逾期数、致命客诉、PPM 与目标值比较 |
-| SPC Cpk/Ppk | 按产品线的制程能力指数 |
-| 保修金额 | 时间窗口内保修总额 |
-| 客户满意度 | 平均满意度评分 |
-| 客户审核摘要 | 已完成审核数、发现项数、最近审核日期 |
+| Reklamationen gesamt / offen / überfällig | Statistik je Zeitfenster |
+| RMAs gesamt / Rücksendemenge / eigenständige Rücksendemenge | Eigenständige Rücksendemenge = Rücksendungen aus RMAs ohne verknüpfte Reklamation |
+| Betroffene Menge (impact_qty) | Summe der betroffenen Mengen aller Reklamationen |
+| PPM | (betroffene Menge + eigenständige Rücksendemenge) / Versandmenge × 1.000.000 |
+| Risikoampel | red/yellow/green, basierend auf Überfälligen, kritischen Reklamationen und PPM im Vergleich zum Zielwert |
+| SPC Cpk/Ppk | Prozessfähigkeitsindex je Produktlinie |
+| Gewährleistungskosten | Gewährleistungssumme im Zeitfenster |
+| Kundenzufriedenheit | Mittlere Zufriedenheitsbewertung |
+| Zusammenfassung Kundenaudits | Abgeschlossene Audits, Feststellungen, Datum des letzten Audits |
 
-**客户摘要 (Customer Summary)：**
+**Kundenzusammenfassung (Customer Summary):**
 
-每个客户提供：客诉数、开放客诉数、逾期数、致命客诉数、RMA 数、PPM、风险灯号。
+Je Kunde: Reklamationen, offene Reklamationen, überfällige, kritische Reklamationen, RMAs, PPM, Risikoampel.
 
-**趋势图数据：** 按月汇总客诉数、RMA 数、退货量。
+**Trenddaten:** Monatliche Summen von Reklamationen, RMAs und Rücksendemenge.
 
 ---
 
-## 8. 常见问题
+## 8. Häufige Fragen
 
-### Q1：为什么无法创建 SCAR？
+### F1: Warum kann ich keine SCAR anlegen?
 
-**A：** 检查以下几点：
-1. 确认你有 `scar` 模块的 CREATE 权限（supplier_qe 或更高角色）。
-2. 从客诉发起 SCAR 时，客诉的 `supplier_responsibility` 必须为 `true`，且 `scar_ref_id` 必须为空。
-3. 从 RMA 发起 SCAR 时，RMA 的 `responsibility` 必须为 `supplier`。
-4. 供应商 ID 必须存在于系统中。
+**A:** Folgendes prüfen:
+1. Sie haben CREATE im Modul `scar` (supplier_qe oder höher).
+2. Beim Auslösen aus einer Reklamation muss deren `supplier_responsibility` `true` und `scar_ref_id` leer sein.
+3. Beim Auslösen aus einer RMA muss deren `responsibility` `supplier` sein.
+4. Die Lieferanten-ID muss im System existieren.
 
-### Q2：客诉关闭按钮为什么灰显？
+### F2: Warum ist die Schaltfläche zum Abschließen der Reklamation ausgegraut?
 
-**A：** 关闭客诉需要 APPROVE 权限（PermissionLevel >= 4）。只有 admin 和 manager 角色可以关闭客诉。
+**A:** Das Abschließen erfordert APPROVE (PermissionLevel >= 4). Nur die Rollen admin und manager können Reklamationen abschließen.
 
-### Q3：RMA 关联客诉时提示"不属于同一客户或产品线"？
+### F3: Beim Verknüpfen von RMA und Reklamation erscheint „nicht derselbe Kunde oder dieselbe Produktlinie“?
 
-**A：** RMA 的 `customer_id` 和 `product_line_code` 必须与关联客诉完全一致。请检查 RMA 和客诉的客户及产品线选择。
+**A:** `customer_id` und `product_line_code` der RMA müssen exakt mit der verknüpften Reklamation übereinstimmen. Bitte Kunde und Produktlinie in RMA und Reklamation prüfen.
 
-### Q4：客户审核发现项无法关闭？
+### F4: Eine Feststellung aus dem Kundenaudit lässt sich nicht schließen?
 
-**A：** 关闭客户审核发现项需要同时满足：
-1. 已填写 `root_cause`（根本原因）和 `corrective_action`（纠正措施）。
-2. 如关联了 CAPA，CAPA 状态必须为 `D8_CLOSURE`。
-3. `customer_confirmed` 必须为 `true`。可通过 `POST /api/audit-findings/{finding_id}/customer-confirm` 单独完成客户确认。
+**A:** Für das Schließen müssen alle Bedingungen erfüllt sein:
+1. `root_cause` (Grundursache) und `corrective_action` (Korrekturmaßnahme) sind ausgefüllt.
+2. Ist ein CAPA verknüpft, muss es den Status `D8_CLOSURE` haben.
+3. `customer_confirmed` muss `true` sein. Die Kundenbestätigung kann separat über `POST /api/audit-findings/{finding_id}/customer-confirm` erfolgen.
 
-### Q5：SCAR 编号冲突怎么办？
+### F5: Was tun bei Konflikten der SCAR-Nummer?
 
-**A：** SCAR 编号使用日期+序号格式自动生成。如果极短时间内并发创建，可能出现编号冲突，系统会自动重试最多 3 次。如果持续失败，请稍后重试。
+**A:** SCAR-Nummern werden automatisch aus Datum und laufender Nummer erzeugt. Bei sehr schnell parallel angelegten SCARs kann es zu Konflikten kommen; das System versucht es automatisch bis zu 3-mal erneut. Bei anhaltendem Fehlschlag später erneut versuchen.
 
-### Q6：如何从客诉直接创建 CAPA？
+### F6: Wie lege ich direkt aus einer Reklamation ein CAPA an?
 
-**A：** 使用 `POST /api/customer-complaints/{id}/create-capa?document_no=XXX`。系统会自动创建 8D 报告（状态为 `D1_TEAM`），并将客诉的 `capa_ref_id` 关联，同时将客诉状态推进为 `investigating`。
+**A:** Mit `POST /api/customer-complaints/{id}/create-capa?document_no=XXX`. Das System legt automatisch einen 8D-Bericht an (Status `D1_TEAM`), verknüpft `capa_ref_id` der Reklamation und schaltet die Reklamation auf `investigating`.
 
-### Q7：customer_qe 角色能看到 SCAR 列表吗？
+### F7: Sieht die Rolle customer_qe die SCAR-Liste?
 
-**A：** 可以。customer_qe 对 `scar` 模块有 VIEW 权限，可以查看 SCAR 列表和详情，但不能创建、流转或关闭 SCAR。如需操作 SCAR，请使用 supplier_qe 或更高级角色。
+**A:** Ja. customer_qe hat VIEW im Modul `scar` und kann SCAR-Liste und -Details ansehen, aber keine SCARs anlegen, weiterschalten oder abschließen. Dafür supplier_qe oder eine höhere Rolle verwenden.
 
-### Q8：逾期客诉如何计算？
+### F8: Wie wird die Überfälligkeit berechnet?
 
-**A：** 逾期 = `due_date` 早于今天 且 状态不是 `closed` 或 `cancelled`。如果 `due_date` 为空，则不判定为逾期。
+**A:** Überfällig = `due_date` liegt vor heute und der Status ist weder `closed` noch `cancelled`. Ist `due_date` leer, gilt die Reklamation nicht als überfällig.
 
-### Q9：PPM 如何计算？
+### F9: Wie wird die PPM berechnet?
 
-**A：** PPM = (客诉影响数量 + 独立 RMA 退货数量) / 出货量 × 1,000,000。出货量优先使用：
-1. 显式传入的 `shipment_qty` 参数
-2. `shipment_records` 表中时间窗口内的出货总量
-3. 客户的 `annual_shipment_qty` 按时间窗口天数折算
+**A:** PPM = (betroffene Menge der Reklamationen + eigenständige RMA-Rücksendemenge) / Versandmenge × 1.000.000. Für die Versandmenge gilt diese Reihenfolge:
+1. Ausdrücklich übergebener Parameter `shipment_qty`
+2. Versandsumme im Zeitfenster aus Tabelle `shipment_records`
+3. `annual_shipment_qty` des Kunden, anteilig auf die Tage des Zeitfensters umgerechnet
 
-如果三者均不可用，PPM 返回 `null`。
+Ist nichts davon verfügbar, liefert PPM `null`.
 
-### Q10：风险灯号如何判定？
+### F10: Wie wird die Risikoampel bestimmt?
 
-| 条件 | 灯号 |
+| Bedingung | Ampel |
 |------|------|
-| 存在开放致命客诉 或 存在逾期客诉 | 🔴 red |
-| PPM > 2×目标值 | 🔴 red |
-| PPM > 目标值（且非 red） | 🟡 yellow |
-| 有开放客诉（且非 red/yellow） | 🟡 yellow |
-| 以上均不满足 | 🟢 green |
+| Offene kritische Reklamation oder überfällige Reklamation vorhanden | 🔴 red |
+| PPM > 2 × Zielwert | 🔴 red |
+| PPM > Zielwert (und nicht red) | 🟡 yellow |
+| Offene Reklamationen vorhanden (und nicht red/yellow) | 🟡 yellow |
+| Keine der obigen Bedingungen | 🟢 green |
 
 ---
 
-## 附录：API 端点汇总
+## Anhang: Übersicht der API-Endpunkte
 
-### 客户管理
+### Kundenverwaltung
 
-| 方法 | 端点 | 最低权限 |
+| Methode | Endpunkt | Mindestberechtigung |
 |------|------|----------|
 | GET | `/api/customers` | VIEW |
 | POST | `/api/customers` | CREATE |
@@ -529,9 +529,9 @@ verified ──reopen──▶ in_progress
 | PUT | `/api/customers/{id}` | CREATE |
 | GET | `/api/customers/{id}/summary` | VIEW |
 
-### 客诉管理
+### Reklamationsmanagement
 
-| 方法 | 端点 | 最低权限 |
+| Methode | Endpunkt | Mindestberechtigung |
 |------|------|----------|
 | GET | `/api/customer-complaints` | VIEW |
 | POST | `/api/customer-complaints` | CREATE |
@@ -546,9 +546,9 @@ verified ──reopen──▶ in_progress
 | POST | `/api/customer-complaints/{id}/link-fmea` | CREATE |
 | POST | `/api/customer-complaints/{id}/create-scar` | CREATE |
 
-### RMA 管理
+### RMA-Verwaltung
 
-| 方法 | 端点 | 最低权限 |
+| Methode | Endpunkt | Mindestberechtigung |
 |------|------|----------|
 | GET | `/api/rma-records` | VIEW |
 | POST | `/api/rma-records` | CREATE |
@@ -563,20 +563,20 @@ verified ──reopen──▶ in_progress
 | POST | `/api/rma-records/{id}/link-fmea` | CREATE |
 | POST | `/api/rma-records/{id}/create-scar` | CREATE |
 
-### SCAR 管理
+### SCAR-Verwaltung
 
-| 方法 | 端点 | 最低权限 |
+| Methode | Endpunkt | Mindestberechtigung |
 |------|------|----------|
 | GET | `/api/scars` | VIEW |
 | POST | `/api/scars` | CREATE |
 | GET | `/api/scars/{id}` | VIEW |
 | PUT | `/api/scars/{id}` | CREATE |
-| POST | `/api/scars/{id}/transition` | 见动作权限表 |
+| POST | `/api/scars/{id}/transition` | Siehe Tabelle der Aktionsrechte |
 | POST | `/api/scars/{id}/link-capa` | CREATE |
 
-### 客户审核
+### Kundenaudits
 
-| 方法 | 端点 | 最低权限 |
+| Methode | Endpunkt | Mindestberechtigung |
 |------|------|----------|
 | GET | `/api/audit-plans` | VIEW |
 | POST | `/api/audit-plans` | CREATE |
@@ -586,9 +586,9 @@ verified ──reopen──▶ in_progress
 | GET | `/api/audit-plans/customer-stats` | VIEW |
 | POST | `/api/audit-findings/{finding_id}/customer-confirm` | CREATE |
 
-### 看板与统计
+### Dashboard und Statistik
 
-| 方法 | 端点 | 最低权限 |
+| Methode | Endpunkt | Mindestberechtigung |
 |------|------|----------|
 | GET | `/api/customer-quality/dashboard` | VIEW |
 | GET | `/api/customer-quality/customers/{id}/trend` | VIEW |

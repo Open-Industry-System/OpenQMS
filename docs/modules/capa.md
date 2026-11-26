@@ -1,229 +1,229 @@
-# 8D / CAPA 模块 — 用户手册
+# Modul 8D / CAPA — Benutzerhandbuch
 
-> 最后更新: 2026-07-09 | 适用版本: OpenQMS v1.0
+> Zuletzt aktualisiert: 2026-07-09 | Gilt für: OpenQMS v1.0
 
 ---
 
-## 1. 功能概述
+## 1. Funktionsüberblick
 
-8D / CAPA（Corrective and Preventive Action）模块提供基于八步法 (Eight Disciplines) 的问题解决全流程管理，从团队组建到关闭归档，覆盖完整的 8D 报告生命周期。
+Das Modul 8D / CAPA (Corrective and Preventive Action) steuert den gesamten Problemlösungsprozess nach der 8D-Methode (Eight Disciplines), von der Teambildung bis zu Abschluss und Archivierung, über den vollständigen Lebenszyklus eines 8D-Berichts.
 
-核心能力：
+Kernfunktionen:
 
-| 能力 | 说明 |
+| Funktion | Beschreibung |
 |------|------|
-| 8D 报告全流程 | D1 团队组建 → D2 问题描述 → D3 临时措施 → D4 根因分析 → D5 永久措施 → D6 实施验证 → D7 预防复发 → D8 关闭 |
-| 状态流转控制 | 严格按序推进，D7/D8 需经理或管理员审批 |
-| FMEA 关联 | 报告可关联到 FMEA 文档及具体失效节点，实现风险追溯 |
-| AI 智能推荐 | D4/D5/D7 步骤可从关联 FMEA 图谱自动推荐根因、纠正措施和预防措施 |
-| AI 草稿生成 | D2–D8 各步骤支持 AI 辅助内容草拟 |
-| 经验教训检索 | 新建报告时可检索历史 CAPA / FMEA 的经验教训 |
-| SCAR 联动 | 供应商导致的 CAPA 可通过 SCAR 模块向供应商发起纠正措施要求 |
-| 产品线隔离 | 数据按产品线和工厂隔离，用户仅可见授权范围内的报告 |
+| Vollständiger 8D-Ablauf | D1 Team → D2 Problembeschreibung → D3 Sofortmaßnahmen → D4 Grundursachenanalyse → D5 Abstellmaßnahmen → D6 Umsetzung und Verifizierung → D7 Wiederholungsvermeidung → D8 Abschluss |
+| Steuerung der Statusübergänge | Strikt in Reihenfolge; D7/D8 erfordern Freigabe durch Manager oder Administrator |
+| FMEA-Verknüpfung | Berichte lassen sich mit FMEA-Dokumenten und konkreten Fehlerknoten verknüpfen, für Risikorückverfolgbarkeit |
+| KI-Empfehlungen | D4/D5/D7 schlagen aus dem verknüpften FMEA-Graphen automatisch Grundursachen, Korrektur- und Vorbeugungsmaßnahmen vor |
+| KI-Entwürfe | D2–D8 unterstützen KI-gestützte Textentwürfe |
+| Lessons-Learned-Suche | Beim Anlegen eines Berichts können Lessons Learned aus historischen CAPAs/FMEAs gesucht werden |
+| SCAR-Kopplung | Lieferantenverursachte CAPAs können über das SCAR-Modul Korrekturmaßnahmen beim Lieferanten anfordern |
+| Produktlinientrennung | Daten sind nach Produktlinie und Werk getrennt; Benutzer sehen nur Berichte in ihrem autorisierten Bereich |
 
-**前端路由：**
+**Frontend-Routen:**
 
-| 页面 | 路由 | 说明 |
+| Seite | Route | Beschreibung |
 |------|------|------|
-| 8D 报告列表 | `/capa` | 列表、筛选、新建 |
-| 8D 报告详情 | `/capa/:id` | 步骤编辑、推进、FMEA 关联 |
+| 8D-Berichtsliste | `/capa` | Liste, Filter, Neu |
+| 8D-Berichtsdetails | `/capa/:id` | Schritte bearbeiten, weiterschalten, FMEA verknüpfen |
 
 ---
 
-## 2. 适用角色与权限
+## 2. Rollen und Berechtigungen
 
-权限模型采用 **ModuleKey × PermissionLevel × 角色** 三级结构。CAPA 模块的 ModuleKey 为 `capa`。
+Das Berechtigungsmodell ist dreistufig: **ModuleKey × PermissionLevel × Rolle**. Der ModuleKey des CAPA-Moduls ist `capa`.
 
-PermissionLevel 含义：0 = NONE（不可见）、1 = VIEW（只读）、2 = CREATE（可新建）、3 = EDIT（可编辑内容）、4 = APPROVE（可审批 D7/D8 推进）、5 = ADMIN（完全控制）。
+Bedeutung von PermissionLevel: 0 = NONE (unsichtbar), 1 = VIEW (nur lesen), 2 = CREATE (anlegen), 3 = EDIT (Inhalte bearbeiten), 4 = APPROVE (Weiterschalten von D7/D8 freigeben), 5 = ADMIN (Vollzugriff).
 
 | ModuleKey | admin | manager | field_qe | planning_qe | supplier_qe | customer_qe | viewer |
 |-----------|:-----:|:-------:|:--------:|:-----------:|:-----------:|:-----------:|:------:|
 | capa | 5 | 4 | 3 | 1 | 2 | 2 | 1 |
 
-**操作与最低权限对照：**
+**Operationen und Mindestberechtigung:**
 
-| 操作 | 所需 PermissionLevel | 说明 |
+| Operation | Erforderliche PermissionLevel | Beschreibung |
 |------|---------------------|------|
-| 查看 8D 列表/详情 | VIEW (1) | viewer、customer_qe、planning_qe 可查看 |
-| 新建 8D 报告 | CREATE (2) | supplier_qe、customer_qe 及以上可新建 |
-| 编辑报告内容 | EDIT (3) | field_qe 及以上可编辑各步骤字段 |
-| 推进 D1–D6 步骤 | EDIT (3) | field_qe 及以上 |
-| 推进 D7 → D8 | APPROVE (4) | manager、admin |
-| 推进 D8 → 归档 | APPROVE (4) | manager、admin |
-| 关联/更换 FMEA | EDIT (3) | field_qe 及以上 |
-| AI 草稿生成 | EDIT (3) | field_qe 及以上 |
-| D4/D5/D7 AI 推荐 | VIEW (1) + FMEA VIEW | 需同时拥有 CAPA VIEW 和 FMEA VIEW |
+| 8D-Liste/-Details ansehen | VIEW (1) | viewer, customer_qe, planning_qe können ansehen |
+| 8D-Bericht anlegen | CREATE (2) | Ab supplier_qe, customer_qe |
+| Berichtsinhalt bearbeiten | EDIT (3) | Ab field_qe können Felder aller Schritte bearbeitet werden |
+| D1–D6 weiterschalten | EDIT (3) | Ab field_qe |
+| D7 → D8 weiterschalten | APPROVE (4) | manager、admin |
+| D8 → Archiv weiterschalten | APPROVE (4) | manager、admin |
+| FMEA verknüpfen/wechseln | EDIT (3) | Ab field_qe |
+| KI-Entwürfe | EDIT (3) | Ab field_qe |
+| KI-Empfehlungen D4/D5/D7 | VIEW (1) + FMEA VIEW | Erfordert CAPA VIEW und FMEA VIEW |
 
-> 注意：`planning_qe` 仅有 VIEW 权限，无法编辑或推进报告。`supplier_qe` 和 `customer_qe` 可创建和编辑，但无法审批 D7/D8 推进。
+> Hinweis: `planning_qe` hat nur VIEW und kann Berichte weder bearbeiten noch weiterschalten. `supplier_qe` und `customer_qe` können anlegen und bearbeiten, aber das Weiterschalten von D7/D8 nicht freigeben.
 
 ---
 
-## 3. 8D 流程详解
+## 3. Der 8D-Ablauf im Detail
 
-8D 方法论将问题解决过程分为八个标准步骤，每一步都有明确的目的和输入输出要求。OpenQMS 严格按此顺序控制流转。
+Die 8D-Methode gliedert die Problemlösung in acht Standardschritte mit klarem Zweck und definierten Ein-/Ausgaben. OpenQMS steuert die Übergänge streng in dieser Reihenfolge.
 
-### 3.1 D1 — 团队组建 (D1_TEAM)
+### 3.1 D1 — Team (D1_TEAM)
 
-**目的：** 组建跨职能团队，明确各成员职责，确保问题解决所需的技能和授权到位。
+**Zweck:** Ein funktionsübergreifendes Team bilden, Verantwortlichkeiten festlegen und sicherstellen, dass die nötigen Kompetenzen und Befugnisse vorhanden sind.
 
-**状态：** `D1_TEAM`（报告创建后的初始状态）
+**Status:** `D1_TEAM` (Ausgangsstatus nach dem Anlegen)
 
-**界面操作：**
+**Bedienung:**
 
-- 以表格形式展示团队成员，每行包含 **成员姓名** 和 **项目职责**
-- 职责选项：质量工程师、工艺工程师、研发工程师、项目经理、生产主管
-- 点击「添加成员」按钮新增，点击行尾删除按钮移除
+- Teammitglieder werden als Tabelle angezeigt, je Zeile **Name** und **Projektrolle**
+- Rollenoptionen: Qualitätsingenieur, Prozessingenieur, Entwicklungsingenieur, Projektleiter, Produktionsleiter
+- Mit „Mitglied hinzufügen“ ergänzen, über die Löschen-Schaltfläche am Zeilenende entfernen
 
-**数据结构：** `d1_team` 为 JSONB 数组，格式示例：
+**Datenstruktur:** `d1_team` ist ein JSONB-Array, Beispiel:
 
 ```json
 [
-  {"name": "张三", "role": "质量工程师"},
-  {"name": "李四", "role": "工艺工程师"}
+  {"name": "Max Mustermann", "role": "Qualitätsingenieur"},
+  {"name": "Erika Musterfrau", "role": "Prozessingenieur"}
 ]
 ```
 
-**流转条件：** 至少添加一名团队成员后，点击「推进下一步」进入 D2。
+**Übergangsbedingung:** Nach mindestens einem Teammitglied mit „Nächster Schritt“ zu D2 wechseln.
 
-### 3.2 D2 — 问题描述 (D2_DESCRIPTION)
+### 3.2 D2 — Problembeschreibung (D2_DESCRIPTION)
 
-**目的：** 用 5W2H 方法准确描述问题：What（什么问题）、Who（谁发现/受影响）、When（何时发生）、Where（何地发生）、Why（为什么是问题）、How（如何发生）、How many（影响数量）。
+**Zweck:** Das Problem mit der 5W2H-Methode genau beschreiben: What (welches Problem), Who (wer hat es entdeckt/ist betroffen), When (wann), Where (wo), Why (warum ist es ein Problem), How (wie ist es aufgetreten), How many (Umfang).
 
-**界面操作：**
+**Bedienung:**
 
-- 文本编辑区（多行 TextArea），支持 5W2H 格式
-- AI 草拟按钮：基于问题描述上下文，AI 可生成 D2 草稿
-- 内容在 `onBlur` 时自动保存
+- Mehrzeiliges Textfeld (TextArea) im 5W2H-Format
+- Schaltfläche KI-Entwurf: Die KI kann aus dem Kontext der Problembeschreibung einen D2-Entwurf erzeugen
+- Inhalte werden bei `onBlur` automatisch gespeichert
 
-**数据字段：** `d2_description` (Text)
+**Datenfeld:** `d2_description` (Text)
 
-### 3.3 D3 — 临时遏制措施 (D3_INTERIM)
+### 3.3 D3 — Sofortmaßnahmen zur Eindämmung (D3_INTERIM)
 
-**目的：** 在根因尚未明确之前，采取临时遏制措施 (Interim Containment Action) 防止问题扩大，保护客户和生产流程。
+**Zweck:** Bevor die Grundursache feststeht, mit Sofortmaßnahmen (Interim Containment Action) eine Ausweitung verhindern und Kunden sowie Produktion schützen.
 
-**典型内容：** 隔离不良品、100% 加检、临时切换替代供应商等。
+**Typischer Inhalt:** Fehlerhafte Teile sperren, 100-%-Prüfung, vorübergehender Wechsel zu einem Ersatzlieferanten usw.
 
-**界面操作：**
+**Bedienung:**
 
-- 文本编辑区（多行 TextArea）
-- AI 草拟按钮：基于 D2 问题描述生成临时措施建议
-- 内容在 `onBlur` 时自动保存
+- Mehrzeiliges Textfeld (TextArea)
+- Schaltfläche KI-Entwurf: Vorschläge für Sofortmaßnahmen auf Basis der Problembeschreibung aus D2
+- Inhalte werden bei `onBlur` automatisch gespeichert
 
-**数据字段：** `d3_interim` (Text)
+**Datenfeld:** `d3_interim` (Text)
 
-### 3.4 D4 — 根因分析 (D4_ROOT_CAUSE)
+### 3.4 D4 — Grundursachenanalyse (D4_ROOT_CAUSE)
 
-**目的：** 通过 5Why、鱼骨图等方法找到问题的根本原因 (Root Cause)，区分技术原因和管理原因。
+**Zweck:** Mit 5-Why, Ishikawa-Diagramm usw. die Grundursache (Root Cause) finden und technische von organisatorischen Ursachen unterscheiden.
 
-**界面操作：**
+**Bedienung:**
 
-- **D4 AI 推荐面板** (`D4RecPanel`)：基于关联 FMEA 图谱和历史 CAPA，自动推荐可能的失效原因
-  - 推荐来源包括：关联 FMEA 节点匹配、关键词匹配、语义搜索、历史 CAPA 相似案例
-  - 点击「采纳」可将推荐文本追加到根因分析区域
-- 文本编辑区（多行 TextArea），标注 "根因分析 (5Why / 鱼骨图)"
-- AI 草拟按钮：基于上下文生成 D4 草稿
-- 内容在 `onBlur` 时自动保存
+- **D4-KI-Empfehlungspanel** (`D4RecPanel`): schlägt anhand des verknüpften FMEA-Graphen und historischer CAPAs mögliche Fehlerursachen vor
+  - Empfehlungsquellen: Abgleich verknüpfter FMEA-Knoten, Stichwortabgleich, Semantiksuche, ähnliche historische CAPA-Fälle
+  - „Übernehmen“ hängt den Vorschlagstext an den Bereich der Grundursachenanalyse an
+- Mehrzeiliges Textfeld (TextArea), beschriftet „Grundursachenanalyse (5-Why / Ishikawa)“
+- Schaltfläche KI-Entwurf: D4-Entwurf aus dem Kontext
+- Inhalte werden bei `onBlur` automatisch gespeichert
 
-**数据字段：** `d4_root_cause` (Text)
+**Datenfeld:** `d4_root_cause` (Text)
 
-**D4 推荐接口：** `GET /api/capa/{report_id}/d4-fmea-recommendations`
-- 需同时拥有 CAPA VIEW 和 FMEA VIEW 权限
-- 返回字段：失效原因名称、描述、匹配来源、置信度、来源 CAPA 标识
+**D4-Empfehlungsschnittstelle:** `GET /api/capa/{report_id}/d4-fmea-recommendations`
+- Erfordert CAPA VIEW und FMEA VIEW
+- Gelieferte Felder: Name und Beschreibung der Fehlerursache, Abgleichsquelle, Konfidenz, Kennung der Quell-CAPA
 
-### 3.5 D5 — 永久纠正措施 (D5_CORRECTION)
+### 3.5 D5 — Abstellmaßnahmen (D5_CORRECTION)
 
-**目的：** 针对根因制定永久纠正措施 (Permanent Corrective Action)，彻底消除问题根因，而非仅控制症状。
+**Zweck:** Für die Grundursache dauerhafte Abstellmaßnahmen (Permanent Corrective Action) festlegen, die die Ursache beseitigen statt nur Symptome zu kontrollieren.
 
-**界面操作：**
+**Bedienung:**
 
-- **D5 AI 推荐面板** (`D5RecPanel`)：基于关联 FMEA 图谱推荐两类内容
-  - **已有控制措施**（来自 FMEA 预防/探测控制），可直接采纳
-  - **通用建议**（AI 生成的预防措施、探测措施、纠正措施），含置信度
-- 文本编辑区（多行 TextArea）
-- AI 草拟按钮
-- 内容在 `onBlur` 时自动保存
+- **D5-KI-Empfehlungspanel** (`D5RecPanel`): schlägt auf Basis des verknüpften FMEA-Graphen zwei Arten von Inhalten vor
+  - **Bestehende Lenkungsmaßnahmen** (aus FMEA-Vermeidungs-/Entdeckungsmaßnahmen), direkt übernehmbar
+  - **Allgemeine Vorschläge** (KI-erzeugte Vermeidungs-, Entdeckungs- und Korrekturmaßnahmen) mit Konfidenz
+- Mehrzeiliges Textfeld (TextArea)
+- Schaltfläche KI-Entwurf
+- Inhalte werden bei `onBlur` automatisch gespeichert
 
-**数据字段：** `d5_correction` (Text)
+**Datenfeld:** `d5_correction` (Text)
 
-**D5 推荐接口：** `GET /api/capa/{report_id}/d5-fmea-recommendations`
-- 返回分为 `existing_controls`（FMEA 已有控制）和 `general_suggestions`（AI 建议措施）
+**D5-Empfehlungsschnittstelle:** `GET /api/capa/{report_id}/d5-fmea-recommendations`
+- Rückgabe getrennt in `existing_controls` (vorhandene FMEA-Maßnahmen) und `general_suggestions` (KI-Vorschläge)
 
-### 3.6 D6 — 实施验证 (D6_VERIFICATION)
+### 3.6 D6 — Umsetzung und Verifizierung (D6_VERIFICATION)
 
-**目的：** 验证 D5 永久措施是否有效实施并消除了问题，确认改进前后数据对比。
+**Zweck:** Prüfen, ob die D5-Abstellmaßnahmen wirksam umgesetzt sind und das Problem beseitigt haben; Daten vor und nach der Verbesserung vergleichen.
 
-**典型内容：** 措施实施日期、验证方法（数据对比、过程审核、客户反馈）、验证结论。
+**Typischer Inhalt:** Umsetzungsdatum, Verifizierungsmethode (Datenvergleich, Prozessaudit, Kundenrückmeldung), Verifizierungsergebnis.
 
-**界面操作：**
+**Bedienung:**
 
-- 文本编辑区（多行 TextArea），标注 "效果验证"
-- AI 草拟按钮
-- 内容在 `onBlur` 时自动保存
+- Mehrzeiliges Textfeld (TextArea), beschriftet „Wirksamkeitsprüfung“
+- Schaltfläche KI-Entwurf
+- Inhalte werden bei `onBlur` automatisch gespeichert
 
-**数据字段：** `d6_verification` (Text)
+**Datenfeld:** `d6_verification` (Text)
 
-### 3.7 D7 — 预防复发 (D7_PREVENTION)
+### 3.7 D7 — Wiederholungsvermeidung (D7_PREVENTION)
 
-**目的：** 将 D5/D6 中验证有效的措施系统化、标准化，防止同类问题在其他产品线、工序或场景中复发。
+**Zweck:** Die in D5/D6 als wirksam bestätigten Maßnahmen systematisieren und standardisieren, damit gleichartige Probleme in anderen Produktlinien, Prozessen oder Situationen nicht erneut auftreten.
 
-**典型内容：** 更新 FMEA、修改控制计划、修订作业指导书、培训人员、更新检验标准。
+**Typischer Inhalt:** FMEA aktualisieren, Produktionslenkungsplan ändern, Arbeitsanweisungen überarbeiten, Personal schulen, Prüfstandards aktualisieren.
 
-**界面操作：**
+**Bedienung:**
 
-- 文本编辑区（多行 TextArea），标注 "预防复发措施"
-- **D7 FMEA 节点推荐面板** (`D7RecPanel`)：列出需更新的 FMEA 失效节点
-  - 每个节点可标记为 "已更新" 或 "无需更新"
-  - 只有全部推荐节点被确认后，「推进下一步」按钮才直接可用
-  - 若存在未确认节点，系统弹出跳过确认对话框，要求填写跳过理由
-- AI 草拟按钮
-- 内容在 `onBlur` 时自动保存
+- Mehrzeiliges Textfeld (TextArea), beschriftet „Maßnahmen zur Wiederholungsvermeidung“
+- **D7-FMEA-Knotenempfehlungen** (`D7RecPanel`): listet zu aktualisierende FMEA-Fehlerknoten
+  - Jeder Knoten kann als „aktualisiert“ oder „keine Aktualisierung nötig“ markiert werden
+  - Erst wenn alle empfohlenen Knoten bestätigt sind, ist „Nächster Schritt“ direkt verfügbar
+  - Bei unbestätigten Knoten öffnet das System einen Dialog zum Überspringen mit Pflichtbegründung
+- Schaltfläche KI-Entwurf
+- Inhalte werden bei `onBlur` automatisch gespeichert
 
-**数据字段：** `d7_prevention` (Text)
+**Datenfeld:** `d7_prevention` (Text)
 
-**D7 推荐接口：** `GET /api/capa/{report_id}/d7-fmea-recommendations`
-- 推荐来源：关联 FMEA 节点匹配 + 关键词匹配
-- 返回字段：失效模式节点 ID/名称、失效原因节点 ID/名称、预防控制节点、匹配来源、建议预防措施
+**D7-Empfehlungsschnittstelle:** `GET /api/capa/{report_id}/d7-fmea-recommendations`
+- Empfehlungsquellen: Abgleich verknüpfter FMEA-Knoten + Stichwortabgleich
+- Gelieferte Felder: ID/Name des Fehlerartknotens, ID/Name des Fehlerursachenknotens, Knoten der Vermeidungsmaßnahme, Abgleichsquelle, vorgeschlagene Vorbeugungsmaßnahme
 
-**D7 软门禁 (Soft Gate)：** 推进到 D8 之前，系统检查所有 D7 推荐的 FMEA 节点是否已确认。若存在未确认节点，需填写跳过理由后才能推进。跳过理由以审计日志记录 (`D7_SKIP_CONFIRMATION`)。
+**Weiches Gate in D7 (Soft Gate):** Vor dem Weiterschalten nach D8 prüft das System, ob alle in D7 empfohlenen FMEA-Knoten bestätigt sind. Bei unbestätigten Knoten muss eine Begründung zum Überspringen angegeben werden; sie wird im Audit-Log (`D7_SKIP_CONFIRMATION`) erfasst.
 
-> D7 推进需要 APPROVE 权限（经理或管理员）。
+> Das Weiterschalten von D7 erfordert APPROVE (Manager oder Administrator).
 
-### 3.8 D8 — 关闭 (D8_CLOSURE)
+### 3.8 D8 — Abschluss (D8_CLOSURE)
 
-**目的：** 团队负责人确认所有措施有效、文件归档、团队解散，正式关闭 8D 报告。
+**Zweck:** Die Teamleitung bestätigt die Wirksamkeit aller Maßnahmen, archiviert die Unterlagen, löst das Team auf und schließt den 8D-Bericht formal ab.
 
-**界面操作：**
+**Bedienung:**
 
-- 文本编辑区（多行 TextArea），标注 "关闭确认"
-- AI 草拟按钮
-- 内容在 `onBlur` 时自动保存
+- Mehrzeiliges Textfeld (TextArea), beschriftet „Abschlussbestätigung“
+- Schaltfläche KI-Entwurf
+- Inhalte werden bei `onBlur` automatisch gespeichert
 
-**数据字段：** `d8_closure` (Text)
+**Datenfeld:** `d8_closure` (Text)
 
-**特殊行为：**
+**Besonderes Verhalten:**
 
-- 报告进入 D8_CLOSURE 状态后，系统自动关闭关联的供应商风险预警 (`SupplierRiskAlert.status → "closed"`)
-- D8 推进到 ARCHIVED 需要 APPROVE 权限
+- Erreicht der Bericht D8_CLOSURE, schließt das System verknüpfte Lieferanten-Risikowarnungen automatisch (`SupplierRiskAlert.status → "closed"`)
+- Das Weiterschalten von D8 zu ARCHIVED erfordert APPROVE
 
 ---
 
-## 4. 状态流转
+## 4. Statusübergänge
 
-### 4.1 状态定义
+### 4.1 Statusdefinitionen
 
-| 状态值 | 中文标签 | 步骤序号 | 说明 |
+| Statuswert | Bezeichnung | Schrittnummer | Beschreibung |
 |--------|----------|:--------:|------|
-| `D1_TEAM` | D1 团队组建 | 0 | 初始状态，新建报告后进入 |
-| `D2_DESCRIPTION` | D2 问题描述 | 1 | — |
-| `D3_INTERIM` | D3 临时措施 | 2 | — |
-| `D4_ROOT_CAUSE` | D4 根因分析 | 3 | — |
-| `D5_CORRECTION` | D5 永久措施 | 4 | — |
-| `D6_VERIFICATION` | D6 实施验证 | 5 | — |
-| `D7_PREVENTION` | D7 预防复发 | 6 | 需经理或管理员审批推进 |
-| `D8_CLOSURE` | D8 关闭 | 7 | 需经理或管理员审批推进 |
-| `ARCHIVED` | 已归档 | 8 | 终态，不可回退 |
+| `D1_TEAM` | D1 Team | 0 | Ausgangsstatus nach dem Anlegen |
+| `D2_DESCRIPTION` | D2 Problembeschreibung | 1 | — |
+| `D3_INTERIM` | D3 Sofortmaßnahmen | 2 | — |
+| `D4_ROOT_CAUSE` | D4 Grundursachenanalyse | 3 | — |
+| `D5_CORRECTION` | D5 Abstellmaßnahmen | 4 | — |
+| `D6_VERIFICATION` | D6 Umsetzung und Verifizierung | 5 | — |
+| `D7_PREVENTION` | D7 Wiederholungsvermeidung | 6 | Weiterschalten erfordert Freigabe durch Manager oder Administrator |
+| `D8_CLOSURE` | D8 Abschluss | 7 | Weiterschalten erfordert Freigabe durch Manager oder Administrator |
+| `ARCHIVED` | Archiviert | 8 | Endstatus, kein Zurück |
 
-### 4.2 合法流转路径
+### 4.2 Gültige Übergänge
 
 ```
 D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
@@ -233,7 +233,7 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
                                     D5_CORRECTION      │
                                               │         │
                                               ↓         │
-                                    D6_VERIFICATION ──→ D5_CORRECTION（回退）
+                                    D6_VERIFICATION ──→ D5_CORRECTION(zurück)
                                               │
                                               ↓
                                     D7_PREVENTION
@@ -245,38 +245,38 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
                                         ARCHIVED
 ```
 
-**正向流转（默认）：** D1 → D2 → D3 → D4 → D5 → D6 → D7 → D8 → ARCHIVED
+**Vorwärts (Standard):** D1 → D2 → D3 → D4 → D5 → D6 → D7 → D8 → ARCHIVED
 
-**允许的回退流转：**
+**Erlaubte Rückschritte:**
 
-| 当前状态 | 可回退到 |
+| Aktueller Status | Zurück nach |
 |----------|----------|
 | D2_DESCRIPTION | D1_TEAM |
 | D4_ROOT_CAUSE | D3_INTERIM |
 | D6_VERIFICATION | D5_CORRECTION |
 
-回退操作通过 `PUT /api/capa/{report_id}` 更新状态字段实现（仅 D2→D1、D4→D3、D6→D5 有合法路径）。
+Rückschritte erfolgen über `PUT /api/capa/{report_id}` mit Änderung des Statusfelds (gültige Pfade nur D2→D1, D4→D3, D6→D5).
 
-### 4.3 权限门禁
+### 4.3 Berechtigungs-Gates
 
-| 推进操作 | 最低权限要求 | 后端校验逻辑 |
+| Weiterschaltung | Mindestberechtigung | Prüflogik im Backend |
 |----------|-------------|-------------|
-| D1 → D2 | EDIT (3) | `advance_capa` — 正常推进 |
-| D2 → D3 | EDIT (3) | `advance_capa` — 正常推进 |
-| D3 → D4 | EDIT (3) | `advance_capa` — 正常推进 |
-| D4 → D5 | EDIT (3) | `advance_capa` — 正常推进 |
-| D5 → D6 | EDIT (3) | `advance_capa` — 正常推进 |
-| D6 → D7 | EDIT (3) | `advance_capa` — 正常推进 |
-| D7 → D8 | **APPROVE (4)** | `require_close_permission` 中间件拦截，检查 `user.role in [admin, manager]` |
-| D8 → ARCHIVED | **APPROVE (4)** | 同上 |
+| D1 → D2 | EDIT (3) | `advance_capa` — normales Weiterschalten |
+| D2 → D3 | EDIT (3) | `advance_capa` — normales Weiterschalten |
+| D3 → D4 | EDIT (3) | `advance_capa` — normales Weiterschalten |
+| D4 → D5 | EDIT (3) | `advance_capa` — normales Weiterschalten |
+| D5 → D6 | EDIT (3) | `advance_capa` — normales Weiterschalten |
+| D6 → D7 | EDIT (3) | `advance_capa` — normales Weiterschalten |
+| D7 → D8 | **APPROVE (4)** | Middleware `require_close_permission` prüft `user.role in [admin, manager]` |
+| D8 → ARCHIVED | **APPROVE (4)** | Wie oben |
 
-> 前端按钮控制：当报告状态为 D7_PREVENTION 或 D8_CLOSURE 时，仅 `canApprove('capa')` 为 true 的用户可见「推进下一步」按钮。
+> Frontend: In den Status D7_PREVENTION oder D8_CLOSURE sehen nur Benutzer mit `canApprove('capa')` = true die Schaltfläche „Nächster Schritt“.
 
-### 4.4 推进 API
+### 4.4 API zum Weiterschalten
 
-**请求：** `POST /api/capa/{report_id}/advance`
+**Anfrage:** `POST /api/capa/{report_id}/advance`
 
-**请求体（可选）：**
+**Request-Body (optional):**
 
 ```json
 {
@@ -284,16 +284,16 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
     {
       "fmea_id": "uuid",
       "node_id": "string",
-      "reason": "跳过理由"
+      "reason": "Begründung zum Überspringen"
     }
   ]
 }
 ```
 
-- `d7_skip_reasons` 仅在 D7→D8 推进且存在未确认 FMEA 节点时使用
-- 每次推进自动生成 `TRANSITION` 类型审计日志，记录旧状态和新状态
+- `d7_skip_reasons` wird nur beim Übergang D7→D8 mit unbestätigten FMEA-Knoten verwendet
+- Jede Weiterschaltung erzeugt automatisch ein Audit-Log vom Typ `TRANSITION` mit altem und neuem Status
 
-**响应体：**
+**Response-Body:**
 
 ```json
 {
@@ -305,64 +305,64 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
     "d4_retry_count": 3,
     "...": "..."
   },
-  "warning": "建议升级处理（D4 验证已回退 3 次）"
+  "warning": "Eskalation empfohlen (D4-Verifizierung 3-mal zurückgesetzt)"
 }
 ```
 
-- `capa` 为推进后的 CAPA 报告（结构与 `GET /api/capa/{id}` 一致）
-- `warning` 仅当本次推进从 `D4_ROOT_CAUSE` 进入 `D5_CORRECTION` 且 `d4_retry_count >= 3` 时返回；其他情况为 `null`
+- `capa` ist der CAPA-Bericht nach dem Weiterschalten (Struktur wie `GET /api/capa/{id}`)
+- `warning` wird nur geliefert, wenn dieser Schritt von `D4_ROOT_CAUSE` nach `D5_CORRECTION` führt und `d4_retry_count >= 3`; sonst `null`
 
 ---
 
-## 5. FMEA 关联
+## 5. FMEA-Verknüpfung
 
-### 5.1 关联目的
+### 5.1 Zweck der Verknüpfung
 
-将 8D 报告关联到 FMEA 文档（及具体失效节点），实现：
+Die Verknüpfung eines 8D-Berichts mit einem FMEA-Dokument (und konkreten Fehlerknoten) ermöglicht:
 
-1. **D4/D5/D7 智能推荐** — 系统从关联的 FMEA 图谱中提取失效原因、控制措施和需更新的节点
-2. **风险追溯** — 从 FMEA 报告可查看关联的 CAPA 报告
-3. **D7 软门禁** — 推进到 D8 前确认相关 FMEA 节点已更新
+1. **Intelligente Empfehlungen in D4/D5/D7** — das System entnimmt dem verknüpften FMEA-Graphen Fehlerursachen, Lenkungsmaßnahmen und zu aktualisierende Knoten
+2. **Risikorückverfolgung** — aus der FMEA lassen sich verknüpfte CAPA-Berichte ansehen
+3. **Weiches Gate in D7** — vor dem Übergang nach D8 wird bestätigt, dass relevante FMEA-Knoten aktualisiert sind
 
-### 5.2 关联操作
+### 5.2 Verknüpfen
 
-**前端操作：**
+**Im Frontend:**
 
-1. 在 8D 报告详情页右侧信息栏点击「关联 FMEA」按钮
-2. 从下拉列表中选择 FMEA 文档（支持搜索）
-3. 关联成功后页面显示绿色标签「已关联 FMEA」
-4. 如需更换，点击「更换 FMEA 关联」重新选择
+1. In den 8D-Berichtsdetails in der rechten Infoleiste auf „FMEA verknüpfen“ klicken
+2. FMEA-Dokument aus der Auswahlliste wählen (mit Suche)
+3. Nach erfolgreicher Verknüpfung erscheint das grüne Tag „FMEA verknüpft“
+4. Zum Wechseln auf „FMEA-Verknüpfung ändern“ klicken und neu wählen
 
-**后端 API：**
+**Backend-API:**
 
-- 关联：`POST /api/capa/{report_id}/link-fmea?fmea_id={fmea_id}&fmea_node_id={node_id}`
-  - 需要 CAPA EDIT 权限
-  - 目标 FMEA 必须存在于用户可访问的工厂范围内
-  - 关联操作记录 `LINK_FMEA` 审计日志
-- 查询关联：`GET /api/capa/{report_id}/related-fmea`
-  - 返回 `fmea_id`、`document_no`、`fmea_node_id`
-- 按 FMEA 节点查询 CAPA：`GET /api/capa/by-fmea-node/{fmea_id}?fmea_node_id={node_id}`
+- Verknüpfen: `POST /api/capa/{report_id}/link-fmea?fmea_id={fmea_id}&fmea_node_id={node_id}`
+  - Erfordert CAPA EDIT
+  - Die Ziel-FMEA muss im für den Benutzer zugänglichen Werksbereich liegen
+  - Die Verknüpfung wird im Audit-Log `LINK_FMEA` erfasst
+- Verknüpfung abfragen: `GET /api/capa/{report_id}/related-fmea`
+  - Liefert `fmea_id`, `document_no`, `fmea_node_id`
+- CAPA nach FMEA-Knoten abfragen: `GET /api/capa/by-fmea-node/{fmea_id}?fmea_node_id={node_id}`
 
-### 5.3 数据字段
+### 5.3 Datenfelder
 
-| 字段 | 类型 | 说明 |
+| Feld | Typ | Beschreibung |
 |------|------|------|
-| `fmea_ref_id` | UUID (nullable) | 关联的 FMEA 文档 ID，外键指向 `fmea_documents.fmea_id` |
-| `fmea_node_id` | String (nullable) | 关联的具体失效节点 ID，用于 D7 推荐精确定位 |
+| `fmea_ref_id` | UUID (nullable) | ID des verknüpften FMEA-Dokuments, Fremdschlüssel auf `fmea_documents.fmea_id` |
+| `fmea_node_id` | String (nullable) | ID des konkreten Fehlerknotens, für präzise D7-Empfehlungen |
 
 ---
 
-## 6. SCAR 联动
+## 6. SCAR-Kopplung
 
-### 6.1 概述
+### 6.1 Überblick
 
-当 8D 报告的根因指向供应商问题时，可通过 SCAR（Supplier Corrective Action Request）模块向供应商发起正式的纠正措施要求。SCAR 与 CAPA 通过 `capa_ref_id` 外键实现双向关联。
+Weist die Grundursache eines 8D-Berichts auf ein Lieferantenproblem, kann über das SCAR-Modul (Supplier Corrective Action Request) eine formale Korrekturmaßnahme beim Lieferanten angefordert werden. SCAR und CAPA sind über den Fremdschlüssel `capa_ref_id` bidirektional verknüpft.
 
-### 6.2 SCAR 关联 CAPA
+### 6.2 SCAR mit CAPA verknüpfen
 
-**后端 API：** `POST /api/scars/{scar_id}/link-capa`
+**Backend-API:** `POST /api/scars/{scar_id}/link-capa`
 
-**请求体：**
+**Request-Body:**
 
 ```json
 {
@@ -370,12 +370,12 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
 }
 ```
 
-- 需要 SCAR 模块的 CREATE 权限
-- 关联后 SCAR 详情页显示关联的 8D 报告编号和链接
+- Erfordert CREATE im SCAR-Modul
+- Nach der Verknüpfung zeigt die SCAR-Detailseite Nummer und Link des 8D-Berichts
 
-### 6.3 SCAR 状态流转
+### 6.3 Statusübergänge der SCAR
 
-| 当前状态 | 操作 | 目标状态 | 所需权限 |
+| Aktueller Status | Operation | Zielstatus | Erforderliche Berechtigung |
 |----------|------|----------|----------|
 | open | start | in_progress | CREATE (2) |
 | in_progress | respond | responded | CREATE (2) |
@@ -384,23 +384,23 @@ D1_TEAM ──→ D2_DESCRIPTION ──→ D3_INTERIM ──→ D4_ROOT_CAUSE
 | verified | close | closed | APPROVE (4) |
 | verified | reopen | in_progress | APPROVE (4) |
 
-### 6.4 SCAR 发起来源
+### 6.4 Auslöser einer SCAR
 
-SCAR 可从以下来源自动或手动发起：
+SCARs können automatisch oder manuell aus folgenden Quellen ausgelöst werden:
 
-| 来源 | source_type | 说明 |
+| Quelle | source_type | Beschreibung |
 |------|-------------|------|
-| IQC 不良 | `iqc` | 来料检验发现批次不良 |
-| 客诉 | `complaint` | 客户投诉指向供应商责任 |
-| RMA 退货 | `rma` | 退货分析指向供应商问题 |
-| 手动 | `manual` | 直接在 SCAR 模块创建 |
+| IQC-Fehler | `iqc` | Wareneingangsprüfung findet fehlerhafte Charge |
+| Reklamation | `complaint` | Kundenreklamation weist auf Lieferantenverantwortung |
+| RMA-Rücksendung | `rma` | Rücksendeanalyse weist auf Lieferantenproblem |
+| Manuell | `manual` | Direkt im SCAR-Modul angelegt |
 
-### 6.5 CAPA 关闭时的 SCAR 联动
+### 6.5 SCAR-Kopplung beim CAPA-Abschluss
 
-当 8D 报告状态推进到 `D8_CLOSURE` 时，系统自动关闭所有关联的、状态非 `closed` 的供应商风险预警：
+Erreicht ein 8D-Bericht `D8_CLOSURE`, schließt das System automatisch alle verknüpften Lieferanten-Risikowarnungen, deren Status nicht `closed` ist:
 
 ```python
-# capa_service.update_capa 内部逻辑
+# capa_service.update_capa Interne Logik
 if capa.status == "D8_CLOSURE":
     await db.execute(
         update(SupplierRiskAlert)
@@ -412,249 +412,249 @@ if capa.status == "D8_CLOSURE":
 
 ---
 
-## 7. AI 辅助功能
+## 7. KI-Unterstützung
 
-### 7.1 AI 草稿生成
+### 7.1 KI-Entwürfe
 
-8D 报告的 D2–D8 各步骤支持 AI 辅助内容草拟，减少手动编写工作量。
+Die Schritte D2–D8 unterstützen KI-gestützte Entwürfe und reduzieren den manuellen Schreibaufwand.
 
-**功能入口：** 每个步骤文本框右上角显示「AI 草拟」按钮
+**Einstieg:** Oben rechts an jedem Textfeld die Schaltfläche „KI-Entwurf“
 
-**操作流程：**
+**Ablauf:**
 
-1. 点击「AI 草拟」按钮，选择草稿格式
-2. 系统调用 `POST /api/capa/{report_id}/draft/{step}` 生成草稿
-3. 草稿在预览面板中展示
-4. 用户可选择「替换」或「追加」将 AI 草稿写入编辑区
-5. 支持「撤销修改」回退到 AI 写入前的内容
+1. „KI-Entwurf“ anklicken und Entwurfsformat wählen
+2. Das System erzeugt den Entwurf über `POST /api/capa/{report_id}/draft/{step}`
+3. Der Entwurf erscheint im Vorschaupanel
+4. Mit „Ersetzen“ oder „Anhängen“ wird der KI-Entwurf ins Eingabefeld übernommen
+5. „Änderung rückgängig“ stellt den Inhalt vor dem KI-Eintrag wieder her
 
-**可草拟步骤：**
+**Schritte mit Entwurf:**
 
-| 步骤 | API 路径 | 上下文输入 |
+| Schritt | API-Pfad | Kontext-Eingabe |
 |------|----------|-----------|
-| D2 | `/draft/d2` | 问题描述大纲 |
-| D3 | `/draft/d3` | D2 内容 |
-| D4 | `/draft/d4` | D2 + D3 内容 |
-| D5 | `/draft/d5` | D4 根因 |
-| D6 | `/draft/d6` | D5 纠正措施 |
-| D7 | `/draft/d7` | D5 + D6 内容 |
-| D8 | `/draft/d8` | 全流程摘要 |
+| D2 | `/draft/d2` | Gliederung der Problembeschreibung |
+| D3 | `/draft/d3` | Inhalt D2 |
+| D4 | `/draft/d4` | Inhalt D2 + D3 |
+| D5 | `/draft/d5` | Grundursache D4 |
+| D6 | `/draft/d6` | Abstellmaßnahmen D5 |
+| D7 | `/draft/d7` | Inhalt D5 + D6 |
+| D8 | `/draft/d8` | Zusammenfassung des Gesamtablaufs |
 
-**权限：** 需要 CAPA EDIT 权限
+**Berechtigung:** erfordert CAPA EDIT
 
-**能力查询：** `GET /api/capa/{report_id}/draft/capabilities`
-- 返回 `{ ai_draft_enabled: bool, llm_provider: string | null }`
-- D1_TEAM 和 ARCHIVED 状态不可用草拟功能
+**Fähigkeitsabfrage:** `GET /api/capa/{report_id}/draft/capabilities`
+- Liefert `{ ai_draft_enabled: bool, llm_provider: string | null }`
+- In den Status D1_TEAM und ARCHIVED ist die Entwurfsfunktion nicht verfügbar
 
-### 7.2 经验教训检索
+### 7.2 Lessons-Learned-Suche
 
-新建 8D 报告后，系统自动弹出经验教训推荐面板 (`LessonsLearnedModal`)，从历史 CAPA 和 FMEA 中检索相似案例和经验。
+Nach dem Anlegen eines 8D-Berichts öffnet das System automatisch das Lessons-Learned-Panel (`LessonsLearnedModal`) und sucht ähnliche Fälle und Erfahrungen aus historischen CAPAs und FMEAs.
 
-**触发时机：** 从列表页创建报告后跳转到详情页时自动触发（携带 `problemDescription` 参数）
+**Auslöser:** automatisch beim Sprung von der Liste zur Detailseite nach dem Anlegen (mit Parameter `problemDescription`)
 
 **API：** `POST /api/capa/{report_id}/lessons-learned`
 
-**权限：** 需要 CAPA VIEW 权限；FMEA 来源数据需额外 FMEA VIEW 权限
+**Berechtigung:** erfordert CAPA VIEW; FMEA-Quelldaten erfordern zusätzlich FMEA VIEW
 
-### 7.3 D4/D5/D7 AI 推荐
+### 7.3 KI-Empfehlungen D4/D5/D7
 
-详见各步骤章节中的推荐面板说明。三个推荐接口均需同时拥有 CAPA VIEW 和 FMEA VIEW 权限。
+Siehe die Beschreibung der Empfehlungspanels in den einzelnen Schritten. Alle drei Empfehlungsschnittstellen erfordern CAPA VIEW und FMEA VIEW.
 
 ---
 
-## 8. 报告列表与筛选
+## 8. Berichtsliste und Filter
 
-### 8.1 列表页
+### 8.1 Listenseite
 
-**路由：** `/capa`
+**Route:** `/capa`
 
-**列表字段：**
+**Listenfelder:**
 
-| 列名 | 字段 | 说明 |
+| Spalte | Feld | Beschreibung |
 |------|------|------|
-| 报告编号 | `document_no` | 格式：`8D-YYYY-NNN` |
-| 标题 | `title` | — |
-| 当前步骤 | `status` | 以 Tag 标签显示中文步骤名 |
-| 严重等级 | `severity` | 彩色标签：致命(红)、严重(橙)、一般(蓝)、轻微(灰) |
-| 期限 | `due_date` | 日期或"-" |
-| 更新时间 | `updated_at` | — |
+| Berichtsnummer | `document_no` | Format: `8D-YYYY-NNN` |
+| Titel | `title` | — |
+| Aktueller Schritt | `status` | Schrittname als Tag |
+| Schwere | `severity` | Farbige Tags: kritisch (rot), schwer (orange), mittel (blau), gering (grau) |
+| Frist | `due_date` | Datum oder „-“ |
+| Aktualisiert | `updated_at` | — |
 
-**严重等级配色：**
+**Farben der Schwerestufen:**
 
-| 等级 | 颜色 |
+| Stufe | Farbe |
 |------|------|
-| 致命 | red |
-| 严重 | orange |
-| 一般 | blue |
-| 轻微 | default（灰色） |
+| kritisch | red |
+| schwer | orange |
+| mittel | blue |
+| gering | default (grau) |
 
-### 8.2 筛选与排序
+### 8.2 Filter und Sortierung
 
 **API：** `GET /api/capa`
 
-| 参数 | 类型 | 说明 |
+| Parameter | Typ | Beschreibung |
 |------|------|------|
-| `page` | int | 页码（默认 1） |
-| `page_size` | int | 每页数量（默认 20，最大 1000） |
-| `status` | string | 按状态筛选 |
-| `product_line` | string | 按产品线筛选 |
-| `overdue` | bool | 仅显示逾期报告（到期日早于今天且未关闭/未归档） |
-| `pending_action` | bool | 仅显示待处理报告（状态非 D8_CLOSURE/ARCHIVED） |
+| `page` | int | Seitennummer (Standard 1) |
+| `page_size` | int | Einträge pro Seite (Standard 20, höchstens 1000) |
+| `status` | string | Filter nach Status |
+| `product_line` | string | Filter nach Produktlinie |
+| `overdue` | bool | Nur überfällige Berichte (Fälligkeit vor heute, nicht abgeschlossen/archiviert) |
+| `pending_action` | bool | Nur offene Berichte (Status nicht D8_CLOSURE/ARCHIVED) |
 
-**产品线隔离：** 用户只能查看其授权产品线范围内的报告。若用户无可授权产品线，返回空列表。
+**Produktlinientrennung:** Benutzer sehen nur Berichte in ihren autorisierten Produktlinien. Ohne autorisierte Produktlinie ist die Liste leer.
 
-### 8.3 新建报告
+### 8.3 Bericht anlegen
 
-**弹窗表单字段：**
+**Felder des Dialogs:**
 
-| 字段 | 必填 | 说明 |
+| Feld | Pflicht | Beschreibung |
 |------|:----:|------|
-| 标题 | 是 | 报告标题 |
-| 报告编号 | 是 | 格式建议 `8D-YYYY-NNN`，需全局唯一 |
-| 严重等级 | 否 | 默认 `一般`，可选：致命、严重、一般、轻微 |
-| 到期日期 | 否 | 期望完成日期 |
+| Titel | Ja | Berichtstitel |
+| Berichtsnummer | Ja | Empfohlenes Format `8D-YYYY-NNN`, global eindeutig |
+| Schwere | Nein | Standard ist die Stufe mittel; wählbar sind kritisch, schwer, mittel, gering (gespeichert als Altwerte) |
+| Fälligkeitsdatum | Nein | Gewünschter Abschlusstermin |
 
 **API：** `POST /api/capa`
 
-**权限：** CAPA CREATE (2)
+**Berechtigung:** CAPA CREATE (2)
 
 ---
 
-## 9. 常见问题
+## 9. Häufige Fragen
 
-### Q1: 报告推进时提示"审批权限不足"
+### F1: Beim Weiterschalten erscheint „Freigaberecht nicht ausreichend“
 
-D7（预防复发）和 D8（关闭）步骤的推进需要 APPROVE (4) 级权限，即 `manager` 或 `admin` 角色。`field_qe`、`supplier_qe`、`customer_qe` 角色无法推进这两步。请联系经理或管理员操作。
+Das Weiterschalten von D7 (Wiederholungsvermeidung) und D8 (Abschluss) erfordert APPROVE (4), also die Rollen `manager` oder `admin`. Die Rollen `field_qe`, `supplier_qe`, `customer_qe` können diese Schritte nicht weiterschalten. Bitte Manager oder Administrator ansprechen.
 
-### Q2: D7 推进时弹出"未确认 FMEA 节点"对话框
+### F2: Beim Weiterschalten von D7 erscheint der Dialog „unbestätigte FMEA-Knoten“
 
-这是 D7 软门禁机制。当系统检测到关联 FMEA 中有待确认的失效节点时，会阻止直接推进。您需要：
+Das ist das weiche Gate in D7. Findet das System in der verknüpften FMEA noch zu bestätigende Fehlerknoten, wird das direkte Weiterschalten verhindert. Sie müssen:
 
-1. 在 D7 推荐面板中逐个确认每个 FMEA 节点（标记为"已更新"或"无需更新"），或
-2. 填写跳过理由后点击「确认跳过并推进」
+1. im D7-Empfehlungspanel jeden FMEA-Knoten einzeln bestätigen (als „aktualisiert“ oder „keine Aktualisierung nötig“ markieren), oder
+2. eine Begründung eingeben und auf „Überspringen bestätigen und weiterschalten“ klicken
 
-跳过理由会记录在审计日志中。
+Die Begründung wird im Audit-Log erfasst.
 
-### Q3: 如何将 CAPA 关联到 FMEA？
+### F3: Wie verknüpfe ich CAPA mit FMEA?
 
-在 8D 报告详情页右侧信息栏点击「关联 FMEA」按钮，从下拉列表中选择 FMEA 文档。关联后可进一步指定具体的失效节点 (`fmea_node_id`)。若需更换关联，点击「更换 FMEA 关联」。
+In den 8D-Berichtsdetails in der rechten Infoleiste auf „FMEA verknüpfen“ klicken und ein FMEA-Dokument aus der Liste wählen. Danach kann zusätzlich der konkrete Fehlerknoten (`fmea_node_id`) angegeben werden. Zum Wechseln „FMEA-Verknüpfung ändern“ wählen.
 
-### Q4: 报告编号格式要求
+### F4: Anforderungen an die Berichtsnummer
 
-`document_no` 需全局唯一。建议使用 `8D-YYYY-NNN` 格式（如 `8D-2026-001`）。重复编号会返回 400 错误。
+`document_no` muss global eindeutig sein. Empfohlen ist das Format `8D-YYYY-NNN` (z. B. `8D-2026-001`). Doppelte Nummern ergeben einen Fehler 400.
 
-### Q5: AI 草拟按钮灰色/不可用？
+### F5: Die Schaltfläche KI-Entwurf ist ausgegraut/nicht verfügbar?
 
-AI 草拟功能需要后端配置 LLM Provider。可通过 `GET /api/capa/{report_id}/draft/capabilities` 检查功能状态。若 `ai_draft_enabled` 为 `false`，表示未配置 LLM Provider。D1_TEAM 和 ARCHIVED 状态下也不可用。
+Die Entwurfsfunktion erfordert einen im Backend konfigurierten LLM-Provider. Den Status prüft `GET /api/capa/{report_id}/draft/capabilities`. Ist `ai_draft_enabled` `false`, ist kein LLM-Provider konfiguriert. In den Status D1_TEAM und ARCHIVED ist sie ebenfalls nicht verfügbar.
 
-### Q6: 产品线筛选不生效？
+### F6: Der Produktlinienfilter wirkt nicht?
 
-列表页按产品线筛选受权限控制。如果用户仅被授权部分产品线（`pl_scope.mode = EXPLICIT`），则只能看到这些产品线下的报告。若用户无任何产品线授权（`pl_scope.mode = NONE`），列表返回空。
+Der Produktlinienfilter der Liste unterliegt den Berechtigungen. Sind dem Benutzer nur einzelne Produktlinien zugewiesen (`pl_scope.mode = EXPLICIT`), sieht er nur deren Berichte. Ohne Produktlinienberechtigung (`pl_scope.mode = NONE`) ist die Liste leer.
 
-### Q7: 如何从供应商问题发起 SCAR？
+### F7: Wie löse ich bei einem Lieferantenproblem eine SCAR aus?
 
-SCAR 不是从 CAPA 模块发起的。需要进入供应商管理模块（`/scars`），创建 SCAR 时指定 `source_type`（如 `complaint`、`iqc`、`rma`），然后通过 `POST /api/scars/{scar_id}/link-capa` 将 SCAR 关联到 CAPA 报告。详见 SCAR 模块文档。
+SCARs werden nicht im CAPA-Modul ausgelöst. Im Lieferantenmanagement (`/scars`) beim Anlegen der SCAR `source_type` angeben (z. B. `complaint`, `iqc`, `rma`) und die SCAR dann über `POST /api/scars/{scar_id}/link-capa` mit dem CAPA-Bericht verknüpfen. Details in der Dokumentation des SCAR-Moduls.
 
-### Q8: D8 关闭后关联的风险预警如何处理？
+### F8: Was passiert nach dem D8-Abschluss mit verknüpften Risikowarnungen?
 
-当 8D 报告推进到 D8_CLOSURE 状态时，系统自动将所有关联的、未关闭的供应商风险预警 (`SupplierRiskAlert`) 标记为 `closed`。此操作由后端自动完成，无需手动干预。
+Erreicht ein 8D-Bericht D8_CLOSURE, markiert das System alle verknüpften offenen Lieferanten-Risikowarnungen (`SupplierRiskAlert`) als `closed`. Das erledigt das Backend automatisch.
 
-### Q9: 如何回退到上一步？
+### F9: Wie gehe ich einen Schritt zurück?
 
-8D 流程支持有限的回退：
+Der 8D-Ablauf erlaubt begrenzte Rückschritte:
 
 - D2 → D1
 - D4 → D3
 - D6 → D5
 
-回退通过 `PUT /api/capa/{report_id}` 更新 `status` 字段实现。前端目前未提供回退按钮，需通过 API 调用。
+Rückschritte erfolgen über `PUT /api/capa/{report_id}` mit Änderung des Felds `status`. Das Frontend bietet derzeit keine Zurück-Schaltfläche, ein API-Aufruf ist nötig.
 
-### Q10: 审计日志记录了哪些操作？
+### F10: Welche Operationen erfasst das Audit-Log?
 
-每次操作均自动创建审计日志 (`audit_logs` 表，`table_name = capa_eightd`)：
+Jede Operation erzeugt automatisch ein Audit-Log (Tabelle `audit_logs`, `table_name = capa_eightd`):
 
-| action | 说明 |
+| action | Beschreibung |
 |--------|------|
-| CREATE | 新建 8D 报告 |
-| UPDATE | 编辑报告内容 |
-| TRANSITION | 状态推进，记录 `old_status` 和 `new_status` |
-| LINK_FMEA | 关联/更换 FMEA，记录 `old_fmea_ref_id` 和 `new_fmea_ref_id` |
-| D7_SKIP_CONFIRMATION | D7 跳过未确认 FMEA 节点，记录 `skipped_nodes` |
+| CREATE | 8D-Bericht anlegen |
+| UPDATE | Berichtsinhalt bearbeiten |
+| TRANSITION | Statusweiterschaltung mit `old_status` und `new_status` |
+| LINK_FMEA | FMEA verknüpfen/wechseln mit `old_fmea_ref_id` und `new_fmea_ref_id` |
+| D7_SKIP_CONFIRMATION | Überspringen unbestätigter FMEA-Knoten in D7 mit `skipped_nodes` |
 
 ---
 
-## 附录：数据模型
+## Anhang: Datenmodell
 
-### CAPAEightD 表 (`capa_eightd`)
+### Tabelle CAPAEightD (`capa_eightd`)
 
-| 字段 | 类型 | 说明 |
+| Feld | Typ | Beschreibung |
 |------|------|------|
-| `report_id` | UUID (PK) | 报告唯一标识 |
-| `document_no` | String(50) | 报告编号，全局唯一 |
-| `title` | String(200) | 报告标题 |
-| `product_line_code` | String(20) | 产品线编码，默认 `DC-DC-100` |
-| `factory_id` | UUID (FK) | 所属工厂 |
-| `status` | String(20) | 当前状态，默认 `D1_TEAM` |
-| `severity` | String(20) | 严重等级，默认 `一般` |
-| `d1_team` | JSONB | 团队成员数组 `[{name, role}]` |
-| `d2_description` | Text | 问题描述 |
-| `d3_interim` | Text | 临时遏制措施 |
-| `d4_root_cause` | Text | 根因分析 |
-| `d5_correction` | Text | 永久纠正措施 |
-| `d6_verification` | Text | 效果验证 |
-| `d7_prevention` | Text | 预防复发措施 |
-| `d8_closure` | Text | 关闭确认 |
-| `d4_retry_count` | Integer, NOT NULL DEFAULT `0` | D4 验证回退计数器 |
-| `fmea_ref_id` | UUID (FK, nullable) | 关联 FMEA 文档 |
-| `fmea_node_id` | String(36, nullable) | 关联 FMEA 失效节点 |
-| `due_date` | Date (nullable) | 到期日期 |
-| `created_by` | UUID (FK, nullable) | 创建人 |
-| `created_at` | DateTime(TZ) | 创建时间 |
-| `updated_at` | DateTime(TZ) | 更新时间 |
+| `report_id` | UUID (PK) | Eindeutige Kennung des Berichts |
+| `document_no` | String(50) | Berichtsnummer, global eindeutig |
+| `title` | String(200) | Berichtstitel |
+| `product_line_code` | String(20) | Produktliniencode, Standard `DC-DC-100` |
+| `factory_id` | UUID (FK) | Werk |
+| `status` | String(20) | Aktueller Status, Standard `D1_TEAM` |
+| `severity` | String(20) | Schwere, Standard ist die Stufe mittel (gespeicherter Altwert) |
+| `d1_team` | JSONB | Array der Teammitglieder `[{name, role}]` |
+| `d2_description` | Text | Problembeschreibung |
+| `d3_interim` | Text | Sofortmaßnahmen zur Eindämmung |
+| `d4_root_cause` | Text | Grundursachenanalyse |
+| `d5_correction` | Text | Abstellmaßnahmen |
+| `d6_verification` | Text | Wirksamkeitsprüfung |
+| `d7_prevention` | Text | Maßnahmen zur Wiederholungsvermeidung |
+| `d8_closure` | Text | Abschlussbestätigung |
+| `d4_retry_count` | Integer, NOT NULL DEFAULT `0` | Zähler für Rückschritte der D4-Verifizierung |
+| `fmea_ref_id` | UUID (FK, nullable) | Verknüpftes FMEA-Dokument |
+| `fmea_node_id` | String(36, nullable) | Verknüpfter FMEA-Fehlerknoten |
+| `due_date` | Date (nullable) | Fälligkeitsdatum |
+| `created_by` | UUID (FK, nullable) | Angelegt von |
+| `created_at` | DateTime(TZ) | Angelegt am |
+| `updated_at` | DateTime(TZ) | Aktualisiert |
 
-### CapaRootCauseVerification 表 (`capa_root_cause_verification`)
+### Tabelle CapaRootCauseVerification (`capa_root_cause_verification`)
 
-D4 根因验证记录表：每条记录对应一个候选根因的现场验证。
+Verifizierungsdatensätze der D4-Grundursache: Jeder Datensatz entspricht der Vor-Ort-Verifizierung einer möglichen Grundursache.
 
-| 字段 | 类型 | 说明 |
+| Feld | Typ | Beschreibung |
 |------|------|------|
-| `verification_id` | UUID (PK) | 验证记录唯一标识 |
-| `capa_id` | UUID (FK) | 所属 8D 报告 (`capa_eightd.report_id`) |
-| `factory_id` | UUID (FK) | 所属工厂 |
-| `root_cause_text` | Text, NOT NULL | 绑定的根因文本 |
-| `method` | Text, nullable | 验证方法，仅允许 `measurement` / `observation` / `reproduction`（DB CHECK） |
-| `result` | Text, nullable | 验证结果说明 |
-| `is_verified` | Boolean, NOT NULL DEFAULT `false` | 是否通过验证（由 `conclusion` 派生保留） |
-| `conclusion` | String(20), NOT NULL DEFAULT `'pending'` | 验证结论：`pending` / `passed` / `failed`（DB CHECK） |
-| `evidence_attachments` | JSONB, NOT NULL DEFAULT `[]` | 证据附件列表 |
-| `source_ref` | JSONB, nullable | 来源引用（如关联推荐项） |
-| `verified_by` | UUID (FK, nullable) | 验证人 |
-| `verified_at` | DateTime(TZ, nullable) | 验证时间 |
-| `created_at` | DateTime(TZ) | 创建时间 |
-| `updated_at` | DateTime(TZ) | 更新时间 |
+| `verification_id` | UUID (PK) | Eindeutige Kennung des Verifizierungsdatensatzes |
+| `capa_id` | UUID (FK) | Zugehöriger 8D-Bericht (`capa_eightd.report_id`) |
+| `factory_id` | UUID (FK) | Werk |
+| `root_cause_text` | Text, NOT NULL | Gebundener Grundursachentext |
+| `method` | Text, nullable | Verifizierungsmethode, nur `measurement` / `observation` / `reproduction` (DB CHECK) |
+| `result` | Text, nullable | Beschreibung des Verifizierungsergebnisses |
+| `is_verified` | Boolean, NOT NULL DEFAULT `false` | Verifiziert ja/nein (aus `conclusion` abgeleitet, beibehalten) |
+| `conclusion` | String(20), NOT NULL DEFAULT `'pending'` | Verifizierungsschluss: `pending` / `passed` / `failed` (DB CHECK) |
+| `evidence_attachments` | JSONB, NOT NULL DEFAULT `[]` | Liste der Nachweisanhänge |
+| `source_ref` | JSONB, nullable | Quellreferenz (z. B. verknüpfter Empfehlungseintrag) |
+| `verified_by` | UUID (FK, nullable) | Verifiziert von |
+| `verified_at` | DateTime(TZ, nullable) | Verifiziert am |
+| `created_at` | DateTime(TZ) | Angelegt am |
+| `updated_at` | DateTime(TZ) | Aktualisiert |
 
-**约束：**
+**Constraints:**
 - `chk_verification_method`: `method IS NULL OR method IN ('measurement','observation','reproduction')`
 - `chk_verification_conclusion`: `conclusion IN ('pending','passed','failed')`
 
 ---
 
-### API 端点汇总
+### Übersicht der API-Endpunkte
 
-| 方法 | 路径 | 权限 | 说明 |
+| Methode | Pfad | Berechtigung | Beschreibung |
 |------|------|------|------|
-| GET | `/api/capa` | VIEW | 列表（支持分页、筛选） |
-| POST | `/api/capa` | CREATE | 新建报告 |
-| GET | `/api/capa/{id}` | VIEW | 报告详情 |
-| PUT | `/api/capa/{id}` | EDIT | 更新报告内容 |
-| POST | `/api/capa/{id}/advance` | D1-D6: EDIT, D7-D8: APPROVE | 推进到下一步 |
-| POST | `/api/capa/{id}/link-fmea` | EDIT | 关联 FMEA |
-| GET | `/api/capa/{id}/related-fmea` | VIEW | 查询关联的 FMEA |
-| GET | `/api/capa/by-fmea-node/{fmea_id}` | VIEW | 按 FMEA 节点查询 CAPA |
-| GET | `/api/capa/{id}/d4-fmea-recommendations` | VIEW + FMEA VIEW | D4 AI 推荐 |
-| GET | `/api/capa/{id}/d5-fmea-recommendations` | VIEW + FMEA VIEW | D5 AI 推荐 |
-| GET | `/api/capa/{id}/d7-fmea-recommendations` | VIEW + FMEA VIEW | D7 FMEA 节点推荐 |
-| GET | `/api/capa/{id}/draft/capabilities` | VIEW | AI 草拟能力查询 |
-| POST | `/api/capa/{id}/draft/{step}` | EDIT | 生成 AI 草稿 |
-| GET | `/api/capa/capabilities` | VIEW | 模块 AI 能力查询 |
-| POST | `/api/capa/{id}/lessons-learned` | VIEW | 经验教训检索 |
+| GET | `/api/capa` | VIEW | Liste (mit Paginierung und Filtern) |
+| POST | `/api/capa` | CREATE | Bericht anlegen |
+| GET | `/api/capa/{id}` | VIEW | Berichtsdetails |
+| PUT | `/api/capa/{id}` | EDIT | Berichtsinhalt aktualisieren |
+| POST | `/api/capa/{id}/advance` | D1-D6: EDIT, D7-D8: APPROVE | Zum nächsten Schritt weiterschalten |
+| POST | `/api/capa/{id}/link-fmea` | EDIT | FMEA verknüpfen |
+| GET | `/api/capa/{id}/related-fmea` | VIEW | Verknüpfte FMEA abfragen |
+| GET | `/api/capa/by-fmea-node/{fmea_id}` | VIEW | CAPA nach FMEA-Knoten abfragen |
+| GET | `/api/capa/{id}/d4-fmea-recommendations` | VIEW + FMEA VIEW | KI-Empfehlungen D4 |
+| GET | `/api/capa/{id}/d5-fmea-recommendations` | VIEW + FMEA VIEW | KI-Empfehlungen D5 |
+| GET | `/api/capa/{id}/d7-fmea-recommendations` | VIEW + FMEA VIEW | FMEA-Knotenempfehlungen D7 |
+| GET | `/api/capa/{id}/draft/capabilities` | VIEW | Abfrage der KI-Entwurfsfähigkeit |
+| POST | `/api/capa/{id}/draft/{step}` | EDIT | KI-Entwurf erzeugen |
+| GET | `/api/capa/capabilities` | VIEW | Abfrage der KI-Fähigkeiten des Moduls |
+| POST | `/api/capa/{id}/lessons-learned` | VIEW | Lessons-Learned-Suche |
