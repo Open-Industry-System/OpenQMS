@@ -77,3 +77,18 @@ it.each([401, 403])('outcome reads and exact decision POST fail immediately on %
   await expect(client.post('/capa/report/advance', { target_state: 'D8_CLOSURE' })).rejects.toMatchObject({ response: { status } });
   expect(seen).toEqual(['/capa/report/outcome-review', '/capa/report/advance']);
 });
+
+it.each([401, 403])("task proposal polling rejects %s without changing the selected factory", async status => {
+  localStorage.setItem("access_token", userToken);
+  localStorage.setItem("current_factory_id", "factory-A");
+  useAuthStore.setState({ token: userToken });
+  const seen: string[] = [];
+  client.defaults.adapter = async config => {
+    seen.push(config.url!);
+    throw { config, response: { status, data: {} } };
+  };
+  await expect(client.get("/capa/report/d5-proposals", { params: { task_id: "task" } }))
+    .rejects.toMatchObject({ response: { status } });
+  expect(seen).toEqual(["/capa/report/d5-proposals"]);
+  expect(localStorage.getItem("current_factory_id")).toBe("factory-A");
+});

@@ -88,7 +88,17 @@ async def test_fixed_window_two_connections_and_next_cycle_adjacent_pages(commit
     adjacent = await activity(owned,before_sequence=fresh['next_before_sequence'],window_end_sequence=fresh['window_end_sequence'])
     assert [i['sequence'] for i in fresh['items']] == list(range(61,111))
     assert [i['sequence'] for i in adjacent['items']] == list(range(11,61))
-    assert set(fresh) == {'task_id','task_status','run_id','run_status','lease_epoch','items','window_end_sequence','next_before_sequence'}
+    assert set(fresh) == {
+        'task_id', 'task_status', 'run_id', 'run_status', 'lease_epoch', 'items',
+        'window_end_sequence', 'next_before_sequence', 'context',
+    }
+    expected_context = {
+        'document_no': '8D-RUNTIME-OWNED',
+        'plugin_key': 'owned',
+        'plugin_version': '1.0.0',
+    }
+    for page in (latest, old, fresh, adjacent):
+        assert page['context'] == expected_context
     assert 'total' not in json.dumps(fresh)
 
 

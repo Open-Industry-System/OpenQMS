@@ -14,7 +14,7 @@ function proposal(v:unknown):v is D5Proposal {
     && new TextEncoder().encode(v.original_text).length<=16384 && states.includes(String(v.state))
     && typeof v.basis_current==='boolean' && typeof v.can_adopt==='boolean' && typeof v.can_withdraw==='boolean' && typeof v.created_at==='string';
 }
-export async function listD5Proposals(reportId:string, page=1, signal?:AbortSignal, filter?:{task_id:string;state:"pending"}):Promise<D5ProposalPage> {
+export async function listD5Proposals(reportId:string, page=1, signal?:AbortSignal, filter?:{task_id:string;state?:"pending"}):Promise<D5ProposalPage> {
   const v:unknown=(await client.get(`/capa/${reportId}/d5-proposals`,{params:{page,page_size:20,...filter},signal})).data;
   if (!record(v) || !Array.isArray(v.items) || !v.items.every(proposal) || v.items.length>20 || !Number.isSafeInteger(v.total) || v.page!==page || v.page_size!==20) throw new Error('Invalid D5 proposal page');
   return v as unknown as D5ProposalPage;
@@ -55,4 +55,17 @@ export async function listTaskD5Proposals(reportId:string,taskId:string,page=1,s
   const result=await listD5Proposals(reportId,page,signal,{task_id:taskId,state:'pending'});
   if(result.items.some(item=>item.task_id!==taskId || item.state!=='pending'))throw new Error('Invalid correction task page');
   return result;
+}
+
+export async function listTaskD5Results(reportId: string, taskId: string, signal?: AbortSignal): Promise<D5Proposal[]> {
+  const filter = { task_id: taskId };
+  const first = await listD5Proposals(reportId, 1, signal, filter);
+  const lastPage = Math.ceil(first.total / first.page_size);
+  const pages = lastPage <= 1 ? [first] : await Promise.all([
+    lastPage === 2 ? first : listD5Proposals(reportId, lastPage - 1, signal, filter),
+    listD5Proposals(reportId, lastPage, signal, filter),
+  ]);
+  const items = pages.flatMap(page => page.items);
+  if (items.some(item => item.task_id !== taskId)) throw new Error("Invalid proposal task page");
+  return [...new Map(items.map(item => [item.proposal_id, item])).values()].slice(-20);
 }

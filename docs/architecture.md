@@ -184,6 +184,10 @@ R4b-1 新增员工内部 D4 正文脱敏候选底座：`capa_current_access` 收
 
 R4b D4 根因本地受控交付在默认关闭的独立 dev、真实回环 profile 下，以员工显式完整性声明、受控修订和 FMEA 来源验证为基础；插件与任务各自保存精确来源范围，并固定同一父 grant。固定只读接收器经过消息门禁读取单字段 RR/READ ONLY 有界脱敏候选，最终重验并提交独立 restricted receipt，未授模型或生产外发。用户显式的受限 restart 只保存控制坐标，从固定入口重新执行、重读当前事实并生成新 receipt；不恢复 Agent 记忆、不借旧 receipt 或扩大原授权。checkpoint/restart 与停止控制有提交前权限围栏，来源先核可见性；并发权限维护可能使旧 metadata 停止控制短暂返回 503。恢复对历史证明、修订和验证元数据逐行加锁，随历史线性增长，尚无大历史性能证据。范围、证据及资源保留状态见[本地交付指南](development/capa-d4-local-text-delivery.md)，恢复合同见[受限恢复规格](superpowers/specs/2026-11-13-agent-d4-restricted-restart-design.md)。
 
+员工侧栏复用固定目标任务、消息队列和现有受控模型。受控 D5 使用 Pi Agent Core 组织模型与工具的对话，OpenQMS 继续负责实际模型接收方、权限、队列及业务收据。受控 D5 模型可接收自然语言，当前轮次的真实追问及已有授权的 D5 建议按时间展示。固定只读任务显示原有结构化结果及证据。任务控制、附件和检查点在同一侧栏的任务详情中。入口、协议和验收见[员工 Agent 侧栏聊天](development/agent-sidebar-chat.md)。
+
+**工作区助手本机试用**由独立的员工聊天入口接收当前 8D 报告坐标与自然语言。试用批准绑定测试租户代际、员工、报告、工厂、产品线、Pi 产物和现有批准的回环模型。Pi 可选择报告摘要、同产品线 PFMEA 查询和草稿预览。模块读取实时复核业务权限。草稿由员工确认接口复核并调用 FMEA 服务，创建收据与业务数据同一事务提交。普通实例默认关闭试用入口。详见[工作区助手和专用任务面板](development/agent-sidebar-chat.md)。
+
 独立元数据 Python SDK 已实现冻结 DTO/严格 codec/stdlib 同步 transport 与十操作 client，Python ≥3.11、零运行时依赖，不导入后端或访问数据库。服务端仍逐次授权，SDK 不缓存权限、解析 run token、自动重试/续租或执行消息；单调 deadline 覆盖整次操作，finish 可能已发送而缺完整确认时仅报告 unknown 并本地阻止重发。独立 unit/自有回环/实际 wheel 隔离安装以及 normal-policy 真实 HTTP fixture 已分阶段验收；Make/自动 CI 接线已双复核，冻结提交的完整本地组合门禁已通过；远端 CI 未执行，自有测试资源已在精确所有权及零其他client/测试进程核验后清理。SDK 不改变固定 worker/hash/profile/catalog 或生产准入，不开放正文附件外发、模型调用或 R5 业务写；见[SDK 交接与限制](development/agent-metadata-python-sdk.md)和[SDK README](../sdk/python/README.md)。
 
 ### 4.7 租户事务与独立迁移

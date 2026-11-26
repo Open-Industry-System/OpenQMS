@@ -8,7 +8,19 @@ export interface ModelDeployment {
   version: string;
 }
 export interface ModelChoice extends ModelDeployment { kind: "local" | "cloud"; }
-export interface TaskWorkflow { status: string; question: string | null; checkpoint_id: string | null; }
+export interface TaskQuestion {
+  question_id: string;
+  text: string;
+  created_at: string;
+}
+export interface TaskWorkflow {
+  status: string;
+  question: string | null;
+  checkpoint_id: string | null;
+  run_id?: string | null;
+  lease_epoch?: number | null;
+  questions?: TaskQuestion[];
+}
 export interface AgentTask {
   model_deployment?: ModelDeployment | null;
   task_id: string;
@@ -165,6 +177,7 @@ export type ActivityItem = ItemBase & ({
   data: ReadonlyCheckpoint | RecoveryCheckpoint;
 });
 export interface ActivityPage {
+  context?: { document_no: string; plugin_key: string; plugin_version: string };
   task_id: string;
   task_status: TaskStatus;
   run_id: string | null;

@@ -30,7 +30,7 @@ test('normal-policy local trial creation, readonly recovery and permanent revoke
   await page.getByRole('button', { name: '以本报告创建任务' }).click();
   const installation = page.getByRole('combobox', { name: '插件安装' });
   await expect(installation).toContainText('openqms.local-d4-metadata');
-  await page.getByRole('textbox', { name: '初始指令' }).fill('仅检查 D4 验证元数据，不执行正文指令');
+  await expect(page.getByRole('textbox', { name: '初始指令' })).toHaveCount(0);
   const createdResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/agent/tasks');
   await page.getByRole('button', { name: '创建任务', exact: true }).click();
   const created = await (await createdResponse).json();
@@ -38,7 +38,7 @@ test('normal-policy local trial creation, readonly recovery and permanent revoke
   expect(created.target_capa_id).toBe(report);
   const taskId = created.task_id;
   const activity = page.getByRole('region', { name: '任务活动' });
-  await expect(page.getByRole('link', { name: `目标报告 ${report}` })).toBeVisible();
+  await expect(activity.locator(`a[href="/capa/${report}"]`).first()).toBeVisible();
   const first = await fixture('run');
   expect(first.code).toBe(0);
   const resultResponse = await page.request.get(`${backend}/api/agent/tasks/${taskId}/results/${first.output.result_id}`, {
@@ -48,6 +48,7 @@ test('normal-policy local trial creation, readonly recovery and permanent revoke
   const result = await resultResponse.json();
   expect(result.sources).toHaveLength(2);
   await expect(page.getByRole('heading', { name: '只读分析结果', exact: true }).last()).toBeVisible();
+  await page.getByText('查看结果证据', { exact: true }).last().click();
   for (const source of result.sources) {
     expect(source.projection_digest).toMatch(/^[0-9a-f]{64}$/);
     const row = activity.locator('li[data-sequence]').filter({ has: page.getByRole('heading', { name: '只读分析结果', exact: true }) }).last();
@@ -58,11 +59,10 @@ test('normal-policy local trial creation, readonly recovery and permanent revoke
     const geometry = await digest.evaluate(element => ({ client: element.clientWidth, scroll: element.scrollWidth }));
     expect(geometry.scroll).toBeLessThanOrEqual(geometry.client);
   }
+  await page.getByRole('button', { name: '任务详情', exact: true }).click();
   await page.getByRole('button', { name: '暂停', exact: true }).click();
   await expect(activity.getByText('任务状态 paused', { exact: true })).toBeVisible();
-  await page.getByRole('textbox', { name: '追加指令' }).fill('暂停期间的元数据输入');
-  await page.getByRole('button', { name: '发送指令' }).click();
-  await expect(activity.getByText('暂停期间的元数据输入', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '追加指令' })).toHaveCount(0);
   await page.getByRole('button', { name: '继续', exact: true }).click();
   await expect(activity.getByText('任务状态 ready', { exact: true })).toBeVisible();
   const resumed = await fixture('run');
@@ -78,6 +78,7 @@ test('normal-policy local trial creation, readonly recovery and permanent revoke
   const restarted = await fixture('run');
   expect(restarted.code).toBe(0);
   expect(restarted.output.run_id).not.toBe(first.output.run_id);
+  await page.getByRole('button', { name: '返回对话', exact: true }).click();
   await expect(activity.getByText(/1 failed/)).toBeVisible();
   expect((await fixture('revoke')).outcome).toBe('revoked');
   const stopped = await fixture('run');
@@ -85,6 +86,7 @@ test('normal-policy local trial creation, readonly recovery and permanent revoke
   expect(stopped.safe_failure).toBeTruthy();
   // User business authority still permits history and pause after plugin fencing.
   await expect(page.getByRole('heading', { name: '只读分析结果', exact: true }).last()).toBeVisible();
+  await page.getByRole('button', { name: '任务详情', exact: true }).click();
   await page.getByRole('button', { name: '暂停', exact: true }).click();
   await expect(activity.getByText('任务状态 paused', { exact: true })).toBeVisible();
   const deniedResume = page.waitForResponse(r => r.url().includes(`/api/agent/tasks/${taskId}/control`) && r.status() === 403);

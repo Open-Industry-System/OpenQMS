@@ -48,8 +48,8 @@ def main(argv=None):
     if len(args)!=1:raise ValueError('explicit runner hook bundle required')
     env=bundle_environment(Path(args[0]),os.environ)
     root=Path(__file__).resolve().parents[3]
-    # Preinstalled Python/dependencies, Node and Chromium are runner obligations;
-    # no fallback credentials, package installation or browser download here.
+    # The workflow prepares Node and the worker. The runner supplies Python
+    # with project dependencies and Chromium.
     return subprocess.run(['make','check-r5-native','PYTHON_BIN='+sys.executable],cwd=root,env=env).returncode
 
 

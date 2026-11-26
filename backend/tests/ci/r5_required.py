@@ -107,4 +107,5 @@ R5_REQUIRED = {'api': {'tests.migrations.test_r5_responses_delta': [
                                                                    'test_actual_managed_child_cannot_reach_B_but_calls_platform_model_A',
                                                                    'test_R5_checkpoint_history_is_paged_typed_current_and_keeps_original_positions']},
  'r5-browser': {'tests.e2e.test_r5_d5_browser': ['test_browser_explicit_correction_and_selected_checkpoint_withdrawal'],
-                'tests.e2e.test_r5_d5_ui': ['test_real_two_role_R5_sidebar_and_report_collaboration']}}
+                'tests.e2e.test_r5_d5_ui': ['test_real_two_role_R5_sidebar_and_report_collaboration'],
+                'tests.e2e.test_r5_sidebar_chat': ['test_employee_continues_r5_sidebar_conversation_on_desktop_and_narrow_screen']}}

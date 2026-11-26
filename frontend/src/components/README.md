@@ -59,16 +59,21 @@ visual category.
   smart-suggestion dropdown, scope tags, AI inline recs),
   `pfmea/` (PFMEA function-tree editor, guidance card, wizard sidebar,
   risk table).
-- **Persistent Agent tasks** — `agent/` is mounted by AppLayout. Its provider
-  retains a fixed-target task selection across route/factory/product-line changes;
-  CAPA starts creation only through an explicit action. Local activity state
-  refreshes two newly adjacent authorised pages as one bounded window. Closing
-  or hiding the drawer aborts browser reads; it does not control the plugin
-  process. Logout/tenant identity changes clear selection and content. Controls
-  use current run/epoch and preserve the original retry key and parameters.
-  `AgentTaskAttachments` mounts after activity only for a visible selected task;
-  it verifies task-scoped availability before listing or uploading and aborts plus
-  clears file/metadata state on identity, credential, epoch, denial, or close.
+- **Workspace assistant (local pilot)** — AppLayout opens a Pi chat for the current
+  authorized 8D report. It shows same-line PFMEA links and an exact confirmation
+  card for draft creation. An authenticated report link with `workspace_conversation`
+  opens the drawer and reads the linked conversation, including its pending preview.
+  Draft creation still requires the employee's confirmation. Page, conversation,
+  or scope changes retire old requests.
+- **Employee Agent tasks** — AppLayout opens the fixed-target sidebar. CAPA
+  starts creation through its explicit report action. The chat shows employee
+  delivery states, R5 questions and visible D5 proposals, and sourced read-only
+  results. Activity still refreshes two authorized pages as one window. Only a
+  bound R5 model offers free text. Task details preserve controls, attachments,
+  and proposal and checkpoint actions. Closing the drawer aborts browser
+  requests. Logout and tenant changes clear selection, and a factory or
+  credential change clears drafts and reauthorizes the fixed selected task.
+  See the [sidebar guide](../../../docs/development/agent-sidebar-chat.md).
 - **CAPA** — `capa/` (`AIDraftButton`, `AIDraftPreview`, the D4/D5/D7
   recommendation panels, `useAIDraft` hook colocated with its panel).
 - **IQC / control plan** — `iqc/` (AQL chart + recommendation drawer),

@@ -49,13 +49,13 @@ macOS试点的原生API/Chromium验收现使用独立手动工作流 `r5-native.
 
 `AGENT_R5_CONTROLLED_ENABLED=false` 为默认值。启用仍要求 dev 租户模式、任务 runtime、Darwin 的 `/usr/bin/sandbox-exec` 和平台私有 `AGENT_R5_CONTROLLED_POLICY_FILE` 全部合格。Linux 等其他主机当前不支持，不回退到普通 Python 进程、旧 R4b 启动器或远程插件声明。
 
-私有策略目录必须 0700，文件为当前平台进程所有的 0400/0600 普通文件；路径组件拒绝符号链接。策略 JSON 精确包含：schema_version=1、artifact、artifact_sha256、interpreter、interpreter_sha256、launcher_sha256、tenant_id、tenant_generation、installation_id、credential_epoch、plugin_version、platform_port、expires_at。哈希由管理员核对实际执行物、解释器与本版 `r5_executor.py` 后登记。策略不含模型凭据；改执行物、解释器、启动器、租户 generation、安装凭据轮次或策略都会拒绝旧准入。完整策略指纹被批准的模型版本和 run token 共同固定。
+私有策略目录必须 0700，文件为当前平台进程所有的 0400/0600 普通文件；路径组件拒绝符号链接。策略 JSON 精确包含：schema_version=1、artifact、artifact_sha256、interpreter、interpreter_sha256、launcher_sha256、tenant_id、tenant_generation、installation_id、credential_epoch、plugin_version、platform_port、expires_at。哈希由管理员核对实际执行物、解释器与本版 `r5_executor.py` 后登记。Pi 产物的策略还包含 `runtime: "node"`。省略该字段时按原 Python 策略处理。策略不含模型凭据；改执行物、解释器、启动器、租户 generation、安装凭据轮次或策略都会拒绝旧准入。完整策略指纹被批准的模型版本和 run token 共同固定。
 
 平台凭据解析器只读取 `r5-env:R5_MODEL_CREDENTIAL_<名称>` 引用对应的专用平台环境变量，不向子进程继承该环境。没有配置真实凭据时保持不可用，不使用默认 AI 配置。
 
-专用 R5 的普通 HTTP claim 即使持有插件 secret 也被拒绝。只有平台内部 `managed_run` 能在私有会话放置不可由 HTTP 表示的 claim 能力，然后把短时 run token 和平台构建的任务/租户元数据通过 stdin 交给受控子进程。T7 的实际插件循环和员工触发入口见下节；此接口不会把 token 返回员工。
+专用 R5 的普通 HTTP claim 即使持有插件 secret 也被拒绝。只有平台内部 `managed_run` 能在私有会话放置不可由 HTTP 表示的 claim 能力，然后把短时 run token 和平台构建的任务/租户元数据通过 stdin 交给受控子进程。Pi 工作进程及员工触发入口见下节。此接口不向员工返回 token。
 
-子进程使用固定解释器 `-I -S`、核实后复制的执行物、私有临时目录和最小环境。OS 策略默认拒绝：仅允许读取核实的执行物、解释器/标准库、系统运行库及必要设备；只读文件元数据不等于正文读取许可。网络唯一例外是策略登记的平台回环端口。Darwin 的规则使用 `localhost:端口` 选择器（该端口的 IPv4/IPv6 回环），调用地址仍使用数字回环；其他接收方、Unix socket、任意外部地址均不开放。平台 runtime 是 token 授权的固定操作集，没有任意 HTTP 代理功能。
+子进程使用固定解释器、核实后复制的执行物、私有临时目录和最小环境。Pi 使用可独立运行的 Node 和单文件构建产物，不加载本机 `node_modules`。OS 策略只放行核实的执行物、系统运行库及必要设备。旧 Python 策略仍以 `-I -S` 启动，放行其标准库。网络唯一例外是策略登记的平台回环端口。Darwin 的规则使用 `localhost:端口` 选择器（该端口的 IPv4/IPv6 回环），调用地址仍使用数字回环；其他接收方、Unix socket、任意外部地址均不开放。平台 runtime 是 token 授权的固定操作集，没有任意 HTTP 代理功能。
 
 平台出站独立解析任务唯一绑定，验证不可变配置 HMAC、部署启用、地址集合和当前完整资料权限；传输直接连接批准 IP，保留原 Host 与 TLS SNI，正常验证证书。不使用环境代理、不跟重定向、不自动重试，也没有默认 provider 或备用接收方。
 
@@ -69,9 +69,19 @@ R5 runtime checkpoint 在 active epoch 固定首次命令水位。暂停端返�
 
 迁移为 `20261114_r5_models` / `tv012_r5_models`，前驱分别是实际 T4 heads `20261114_r5_d5_basis` / `tv011_r5_d5_basis`。数据库约束与触发器固定部署版本及唯一任务绑定；任何非空部署/绑定都拒绝降级。
 
-## T7 受控插件循环与员工启动（候选）
+## Pi 工作进程与员工启动
 
-`backend/examples/d5_proposal_agent.py` 是实际试点执行物，只依赖 Python 标准库，由既有 `sandbox-exec` 执行器校验哈希、复制并以 `-I -S` 启动；必须用这份实际文件重新登记私有策略和模型部署版本。默认关闭、Darwin/dev 限制、唯一平台回环网络例外和模型批准接收方均沿用 T6，普通 claim 不开放。
+受控 D5 工作进程使用官方 [Pi Agent Core](https://github.com/earendil-works/pi/tree/main/packages/agent) 执行对话循环和顺序工具调度。Pi 的模型传输接到 OpenQMS 现有回环接口。平台仍生成模型请求并验证批准的接收方、业务权限、工具参数和幂等收据。Pi 工具只转交服务端已签发的不透明调用 ID。
+
+使用官方独立 Node 24（Pi 要求 Node ≥22.19）和以下命令生成可登记的单文件。锁文件固定 Pi 0.75.5。构建只打包 Pi 的循环、事件流及工具验证，升级时需复跑构建和沙箱验收。macOS 上依赖 Homebrew 额外动态库的 Node 不在沙箱读取范围内。
+
+```sh
+npm --prefix backend/examples/pi_d5_agent ci --ignore-scripts --no-audit --no-fund
+npm --prefix backend/examples/pi_d5_agent run build
+npm --prefix backend/examples/pi_d5_agent test
+```
+
+登记 `backend/examples/pi_d5_agent/dist/worker.mjs`、独立 Node 的真实路径、`runtime: "node"` 及各自的哈希。运行中的授权检查仅对同一操作系统文件身份复用 Node 哈希。文件变动时重新计算，实际启动前始终核对解释器字节。启动器也变更了，已有批准模型的执行物固定值需由管理员重新登记为新的批准部署版本，已有任务不会改绑。
 
 员工创建任务后保持 `ready`，明确调用 `POST /api/agent/tasks/{task_id}/launch` 才开始执行。此入口只允许当前任务发起人兼执行员工，按当期资料权限和批准部署重新授权。它等待子进程，客户端 HTTP 超时应至少 130 秒；服务端通过线程等待子进程，事件循环仍可处理补充消息和轮询。并发 launch 被拒绝，数据库 claim 也禁止同时接管有效 lease。员工响应只含 task_id/status，不含 token。`GET /api/agent/tasks/{task_id}/workflow` 返回当前运行的 question、checkpoint_id 和等待状态，响应 no-store；每次按实际读者及运行身份重新检查完整来源和部署，撤权后不释放问题原文。T8 可并发轮询此接口、用原 messages 接口提交补充。
 

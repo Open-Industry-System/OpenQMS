@@ -100,6 +100,10 @@ describe("fresh bounded whole activity cycle", () => {
     });
     expect(result.current.page).toBeNull();
     expect(result.current.status).toBe("denied");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(getTaskActivity).toHaveBeenCalledTimes(3);
   });
   it.each(["network", "parse"])("second-page %s failure discards old and staged content; retries from new latest", async () => {
     vi.mocked(getTaskActivity).mockResolvedValueOnce(page(1, 2)).mockResolvedValueOnce(page(2, 3, 2)).mockRejectedValueOnce(new Error("invalid/network"));
@@ -116,6 +120,37 @@ describe("fresh bounded whole activity cycle", () => {
     });
     expect(getTaskActivity).toHaveBeenLastCalledWith(task, { page_size: 50 }, expect.any(AbortSignal));
     expect(result.current.page?.window_end_sequence).toBe(5);
+  });
+  it("stops after consecutive connection, server, and invalid activity errors until refreshed", async () => {
+    vi.mocked(getTaskActivity).mockResolvedValueOnce(page(1, 2))
+      .mockRejectedValueOnce(new Error("connection interrupted"))
+      .mockRejectedValueOnce({ response: { status: 503 } })
+      .mockResolvedValueOnce({ ...page(3, 4), task_id: run });
+    const { result, rerender } = setup();
+    await flush();
+    expect(result.current.page?.window_end_sequence).toBe(2);
+
+    await act(() => vi.advanceTimersByTimeAsync(2000));
+    expect(result.current).toEqual({ page: null, status: "interrupted" });
+    await act(() => vi.advanceTimersByTimeAsync(10000));
+    expect(result.current).toEqual({ page: null, status: "offline" });
+    expect(getTaskActivity).toHaveBeenCalledTimes(4);
+
+    act(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, value: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+      Object.defineProperty(document, "hidden", { configurable: true, value: false });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(30000));
+    expect(getTaskActivity).toHaveBeenCalledTimes(4);
+    expect(result.current.status).toBe("offline");
+
+    vi.mocked(getTaskActivity).mockResolvedValueOnce(page(5, 6));
+    rerender({ taskId: task, identity: readAgentIdentity(), credential: "jwt", open: true, requestEpoch: 1 });
+    await flush();
+    expect(getTaskActivity).toHaveBeenCalledTimes(5);
+    expect(result.current).toMatchObject({ page: { window_end_sequence: 6 }, status: "ready" });
   });
   it("one request cycle in flight; closed late history ignored; reopen latest new W", async () => {
     const history = deferred<any>();

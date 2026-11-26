@@ -8,6 +8,8 @@ test('explicit correction intent and selected checkpoint withdrawal persist',asy
   await page.goto('/login');await page.locator('#username').fill(details.username);await page.locator('#password').fill(details.password);await page.locator('button[type=submit]').click();await expect(page).toHaveURL(/dashboard/);
   await page.goto(`/capa/${report}`);await page.getByRole('button',{name:'Agent 任务',exact:true}).click();
   await page.getByLabel('选择任务',{exact:true}).selectOption(task);
+  await page.getByRole('button',{name:'任务详情',exact:true}).click();
+  await page.getByText('建议与检查点',{exact:true}).click();
   await page.getByLabel('更正当前任务建议',{exact:true}).selectOption(details.proposal);
   const correction=page.waitForResponse(r=>r.url().endsWith(`/api/agent/tasks/${task}/messages`)&&r.request().method()==='POST');
   await page.getByRole('button',{name:'明确更正选中建议',exact:true}).click();

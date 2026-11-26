@@ -11,6 +11,11 @@ async function acceptance(page: import("@playwright/test").Page, action: string,
   expect(response.ok(), action).toBeTruthy();
 }
 
+async function openAttachments(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: "任务详情", exact: true }).click();
+  await page.locator("summary").filter({ hasText: /^任务附件$/ }).click();
+}
+
 test("actual ClamAV task attachments are scan-gated, downloaded once, and withdrawn", async ({ page, context }) => {
   const configResponse = await page.request.get(`${backend}/__agent_attachment_acceptance/config`, {
     headers: { "X-Acceptance-Nonce": process.env.AGENT_HARNESS_NONCE! },
@@ -42,16 +47,19 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
   const chooser = page.getByRole("combobox", { name: "选择任务" });
   await expect(chooser.locator(`option[value="${config.task_id}"]`)).toBeAttached();
   await chooser.selectOption(config.task_id);
+  await openAttachments(page);
   await expect(page.getByText("任务私有附件", { exact: true })).toBeVisible();
 
   await acceptance(page, "off", config.nonce);
   await page.getByRole("button", { name: "关闭任务侧栏" }).click();
   await page.getByRole("button", { name: "Agent 任务", exact: true }).click();
+  await openAttachments(page);
   await expect(page.getByText("任务私有附件", { exact: true })).toHaveCount(0);
   expect(attachmentPosts).toEqual([]);
   await acceptance(page, "on", config.nonce);
   await page.getByRole("button", { name: "关闭任务侧栏" }).click();
   await page.getByRole("button", { name: "Agent 任务", exact: true }).click();
+  await openAttachments(page);
   await expect(page.getByText("任务私有附件", { exact: true })).toBeVisible();
 
   const file = page.locator('input[type="file"]');
@@ -113,6 +121,7 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
   await acceptance(page, "task-restore", config.nonce);
   await page.getByRole("button", { name: "关闭任务侧栏" }).click();
   await page.getByRole("button", { name: "Agent 任务", exact: true }).click();
+  await openAttachments(page);
   await expect(page.getByText("任务私有附件", { exact: true })).toBeVisible();
   await expect(page.getByText("clean.txt · available", { exact: true })).toBeVisible();
   const staleFile = page.locator('input[type="file"]');
@@ -147,6 +156,7 @@ test("actual ClamAV task attachments are scan-gated, downloaded once, and withdr
   await expect(page.getByText("任务私有附件", { exact: true })).toHaveCount(0);
   await expect(page.getByText("stale.txt", { exact: true })).toHaveCount(0);
   await secondChooser.selectOption(config.task_id);
+  await openAttachments(page);
   await expect(page.getByText("任务私有附件", { exact: true })).toBeVisible();
   await expect(page.getByText("clean.txt · available", { exact: true })).toBeVisible();
   releaseDeniedDownload();

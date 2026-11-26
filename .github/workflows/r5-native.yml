@@ -41,6 +41,15 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.frozen_sha }}
           persist-credentials: false
+      - name: Set up standalone Node for the R5 Pi worker
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Build and test the R5 Pi worker from locked dependencies
+        working-directory: backend/examples/pi_d5_agent
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm --ignore-scripts test
       - name: Run mandatory R5 native API and Chromium acceptance
         run: |
           cd backend

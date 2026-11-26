@@ -90,8 +90,11 @@ client.interceptors.response.use(
     // User task activity and attachment reads must withdraw restricted content
     // immediately on denial. Credential refresh elsewhere can refetch the same
     // selected task afterward, but never replays a protected attachment request.
-    const isUserTaskRead = originalRequest?.url?.startsWith("/agent/tasks");
-    if ((isUserTaskRead || isD4TextPreview(originalRequest?.url)
+    const isUserTaskRequest = originalRequest?.url?.startsWith("/agent/tasks");
+    const isTaskProposalRead = originalRequest?.method === "get"
+      && /^\/capa\/[^/]+\/d5-proposals$/.test(originalRequest.url ?? "")
+      && typeof originalRequest.params?.task_id === "string";
+    if ((isUserTaskRequest || isTaskProposalRead || isD4TextPreview(originalRequest?.url)
         || isOutcomePrivateRequest(originalRequest?.url, originalRequest?.method))
         && (error.response?.status === 401 || error.response?.status === 403)) {
       return Promise.reject(error);

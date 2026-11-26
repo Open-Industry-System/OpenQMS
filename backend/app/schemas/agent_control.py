@@ -216,6 +216,13 @@ ActivityItem = Annotated[ActivityMessage | ActivityAck | ActivityRun | ActivityC
     | ActivityEvent | ActivityResult | ActivityCheckpoint, Field(discriminator="kind")]
 
 
+class ActivityContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_no: str
+    plugin_key: str
+    plugin_version: str
+
+
 class ActivityPage(BaseModel):
     model_config = ConfigDict(extra="forbid")
     task_id: UUID
@@ -226,3 +233,4 @@ class ActivityPage(BaseModel):
     window_end_sequence: Sequence
     next_before_sequence: Annotated[int, Field(strict=True, ge=1)] | None
     items: list[ActivityItem] = Field(max_length=50)
+    context: ActivityContext

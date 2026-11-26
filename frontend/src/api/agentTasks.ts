@@ -141,7 +141,7 @@ function parse<T>(value: unknown, check: Check): T {
   return value as T;
 }
 export function parseActivityPage(value: unknown): ActivityPage {
-  const page = parse<ActivityPage>(value, object({
+  const fields = {
     task_id: uuid,
     task_status: taskStatus,
     run_id: nullable(uuid),
@@ -149,8 +149,10 @@ export function parseActivityPage(value: unknown): ActivityPage {
     lease_epoch: nullable(int()),
     window_end_sequence: int(),
     next_before_sequence: nullable(int(1)),
-    items: list(item)
-  }));
+    items: list(item),
+  };
+  const context = object({ document_no: str(50), plugin_key: str(200), plugin_version: str(100) });
+  const page = parse<ActivityPage>(value, body => object({ ...fields, context })(body) || object(fields)(body));
   if ((page.run_id === null) !== (page.run_status === null) || (page.run_id === null) !== (page.lease_epoch === null) || (page.next_before_sequence !== null && page.next_before_sequence > page.window_end_sequence + 1) || page.items.some((entry, i) => entry.sequence > page.window_end_sequence || (i > 0 && entry.sequence <= page.items[i - 1].sequence)))
     throw new Error("Invalid Agent page bounds");
   return page;
@@ -216,7 +218,21 @@ export async function launchTask(taskId: string, signal?: AbortSignal): Promise<
   return value;
 }
 export async function getTaskWorkflow(taskId:string, signal?:AbortSignal):Promise<TaskWorkflow> {
-  return parse((await client.get(`${base}/${taskId}/workflow`,{signal})).data,object({status:str(100),question:nullable(str(2000)),checkpoint_id:nullable(uuid)}));
+  const fields = { status: str(100), question: nullable(str(2000)), checkpoint_id: nullable(uuid) };
+  const withHistory = object({
+    ...fields,
+    run_id: nullable(uuid),
+    lease_epoch: nullable(int()),
+    questions: list(object({ question_id: uuid, text: str(2000), created_at: date }), 0, 8),
+  });
+  const workflow = parse<TaskWorkflow>((await client.get(`${base}/${taskId}/workflow`, { signal })).data,
+    value => withHistory(value) || object(fields)(value));
+  if (workflow.questions && (
+    (workflow.run_id === null) !== (workflow.lease_epoch === null)
+    || (workflow.run_id === null && workflow.questions.length > 0)
+    || new Set(workflow.questions.map(question => question.question_id)).size !== workflow.questions.length
+  )) throw new Error("Invalid Agent workflow history");
+  return workflow;
 }
 
 export interface D5CheckpointReference {checkpoint_id:string;run_id:string;created_at:string;}
