@@ -71,7 +71,7 @@ const HeatmapToolbar: React.FC<HeatmapToolbarProps> = ({
   };
 
   return (
-    <Space style={{ marginBottom: 16 }}>
+    <Space wrap style={{ marginBottom: 16 }}>
       <Select
         value={productLineCode ?? undefined}
         placeholder={t("toolbar.allProductLines")}

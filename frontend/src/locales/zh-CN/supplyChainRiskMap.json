@@ -58,6 +58,17 @@
     "clickSupplier": "点击供应商查看详情"
   },
   "heatmap": {
+    "title": "供应商风险矩阵",
+    "supplier": "供应商",
+    "legend": "风险等级",
+    "change": "较上期 {{value}}",
+    "tones": {
+      "low": "低风险",
+      "medium": "中风险",
+      "high": "高风险",
+      "critical": "严重风险",
+      "missing": "无数据"
+    },
     "tooltipSource": "来源: {{source}}",
     "columns": {
       "risk_score": "风险分",

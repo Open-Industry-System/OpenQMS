@@ -75,7 +75,7 @@ const SupplyChainRiskMapPage: React.FC = () => {
   const showDetail = selectedSupplierIds.length > 0;
 
   return (
-    <PageShell title={t("page.title")}>
+    <PageShell title={t("page.title")} className="supply-chain-risk-map">
       <HeatmapToolbar
         period={period}
         productLineCode={selectedProductLine}
@@ -93,20 +93,24 @@ const SupplyChainRiskMapPage: React.FC = () => {
           onChange={setPeriod}
         />
       )}
-      <Row gutter={16}>
-        <Col span={showDetail ? 16 : 24}>
-          <DataCard title={null}>
+      <Row gutter={[16, 16]}>
+        <Col span={24}>
+          <DataCard title={t("heatmap.title")} className="risk-heatmap-card">
             {loading ? (
               <Spin />
             ) : heatmap && heatmap.rows.length > 0 ? (
-              <RiskHeatmap data={heatmap} onSupplierClick={handleSupplierClick} />
+              <RiskHeatmap
+                data={heatmap}
+                selectedSupplierIds={selectedSupplierIds}
+                onSupplierClick={handleSupplierClick}
+              />
             ) : (
               <Empty description={t("page.emptyDescription")} />
             )}
           </DataCard>
         </Col>
         {showDetail && (
-          <Col span={8}>
+          <Col span={24}>
             <DetailPanel
               selectedSupplierIds={selectedSupplierIds}
               productLineCode={selectedProductLine}
