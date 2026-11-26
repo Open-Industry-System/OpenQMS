@@ -29,7 +29,7 @@ def test_invalid_identity_cannot_select_a_fixture(pr, database):
 
 async def test_only_exact_optional_fixture_runs(monkeypatch):
     db = SimpleNamespace(scalar=AsyncMock(return_value="qms_preview"))
-    fixture = SimpleNamespace(seed=AsyncMock())
+    fixture = SimpleNamespace(seed=AsyncMock(), verify=AsyncMock())
     look_up = Mock(side_effect=lambda name: object() if name.endswith(".pr_59") else None)
     load = Mock(return_value=fixture)
     monkeypatch.setattr(preview_fixtures, "find_spec", look_up)
@@ -44,6 +44,7 @@ async def test_only_exact_optional_fixture_runs(monkeypatch):
     load.assert_called_once_with("app.preview_fixtures.pr_59")
     db.scalar.assert_awaited_once()
     fixture.seed.assert_awaited_once_with(db)
+    fixture.verify.assert_awaited_once_with(db)
 
 
 async def test_non_preview_database_rejects_fixture_before_loading(monkeypatch):
@@ -59,9 +60,38 @@ async def test_non_preview_database_rejects_fixture_before_loading(monkeypatch):
 
 async def test_fixture_failure_propagates_to_initialization(monkeypatch):
     db = SimpleNamespace(scalar=AsyncMock(return_value="qms_preview"))
-    fixture = SimpleNamespace(seed=AsyncMock(side_effect=RuntimeError("fixture failed")))
+    fixture = SimpleNamespace(
+        seed=AsyncMock(side_effect=RuntimeError("fixture failed")),
+        verify=AsyncMock(),
+    )
     monkeypatch.setattr(preview_fixtures, "find_spec", Mock(return_value=object()))
     monkeypatch.setattr(preview_fixtures, "import_module", Mock(return_value=fixture))
 
     with pytest.raises(RuntimeError, match="fixture failed"):
         await preview_fixtures.seed_preview_fixture(db, 59)
+    fixture.verify.assert_not_awaited()
+
+
+async def test_fixture_without_verification_fails_before_seeding(monkeypatch):
+    db = SimpleNamespace(scalar=AsyncMock(return_value="qms_preview"))
+    fixture = SimpleNamespace(seed=AsyncMock())
+    monkeypatch.setattr(preview_fixtures, "find_spec", Mock(return_value=object()))
+    monkeypatch.setattr(preview_fixtures, "import_module", Mock(return_value=fixture))
+
+    with pytest.raises(ValueError, match=r"requires seed\(db\) and verify\(db\)"):
+        await preview_fixtures.seed_preview_fixture(db, 59)
+    fixture.seed.assert_not_awaited()
+
+
+async def test_failed_verification_propagates_after_seeding(monkeypatch):
+    db = SimpleNamespace(scalar=AsyncMock(return_value="qms_preview"))
+    fixture = SimpleNamespace(
+        seed=AsyncMock(),
+        verify=AsyncMock(side_effect=ValueError("missing page data")),
+    )
+    monkeypatch.setattr(preview_fixtures, "find_spec", Mock(return_value=object()))
+    monkeypatch.setattr(preview_fixtures, "import_module", Mock(return_value=fixture))
+
+    with pytest.raises(ValueError, match="missing page data"):
+        await preview_fixtures.seed_preview_fixture(db, 59)
+    fixture.seed.assert_awaited_once_with(db)

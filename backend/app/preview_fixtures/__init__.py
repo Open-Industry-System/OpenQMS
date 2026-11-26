@@ -26,7 +26,7 @@ def preview_pr_from_env(environ: Mapping[str, str]) -> int | None:
 
 
 async def seed_preview_fixture(db: AsyncSession, preview_pr: int | None) -> None:
-    """Run only the matching fixture in the caller's seed transaction."""
+    """Prepare and verify the matching fixture before the caller commits."""
     if preview_pr is None:
         return
     name = f"{__name__}.pr_{preview_pr}"
@@ -34,4 +34,8 @@ async def seed_preview_fixture(db: AsyncSession, preview_pr: int | None) -> None
         return
     if await db.scalar(text("SELECT current_database()")) != "qms_preview":
         raise ValueError("PR fixtures require the isolated preview database")
-    await import_module(name).seed(db)
+    fixture = import_module(name)
+    if not callable(getattr(fixture, "seed", None)) or not callable(getattr(fixture, "verify", None)):
+        raise ValueError(f"Preview fixture for PR {preview_pr} requires seed(db) and verify(db)")
+    await fixture.seed(db)
+    await fixture.verify(db)

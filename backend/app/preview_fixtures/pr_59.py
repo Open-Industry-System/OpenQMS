@@ -7,13 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import RequestScope
-from app.core.factory_scope import FactoryScope, ProductLineScope
+from app.core.deps import RequestScope, get_request_scope
+from app.core.factory_scope import check_product_line_access
 from app.models.product_line import ProductLine
 from app.models.role import RoleDefinition, UserProductLine
 from app.models.supplier import Supplier, SupplierSCAR
 from app.models.user import User
-from app.services.supply_chain_risk_map.service import current_period, generate_snapshot
+from app.services.supply_chain_risk_map.service import current_period, generate_snapshot, get_heatmap_data
 
 LINE_A = "PR59-A"
 LINE_B = "PR59-B"
@@ -28,8 +28,7 @@ SUPPLIERS = {
 }
 
 
-async def seed(db: AsyncSession) -> None:
-    """Add the cases to the seeded Manager's factory without resetting existing rows."""
+async def _preview_manager(db: AsyncSession) -> User:
     manager = (
         await db.scalars(
             select(User)
@@ -39,7 +38,17 @@ async def seed(db: AsyncSession) -> None:
     ).one()
     if manager.factory_id is None:
         raise ValueError("PR 59 preview fixture requires a seeded Manager factory")
+    return manager
 
+
+async def _manager_scope(db: AsyncSession, manager: User) -> RequestScope:
+    # Preview copies the seeded Manager's factory and line grants to the demo Manager.
+    return await get_request_scope(None, factory_id=manager.factory_id, user=manager, db=db)
+
+
+async def seed(db: AsyncSession) -> None:
+    """Add the cases to the seeded Manager's factory without resetting existing rows."""
+    manager = await _preview_manager(db)
     for code, name in ((LINE_A, "PR59 验收产线 A"), (LINE_B, "PR59 验收产线 B")):
         await db.execute(
             insert(ProductLine)
@@ -109,12 +118,29 @@ async def seed(db: AsyncSession) -> None:
 
     # The risk map reads snapshots, so prepare the same output the browser's
     # refresh action generates while the preview seed transaction is still open.
-    scope = RequestScope(
-        factory_scope=FactoryScope([manager.factory_id], manager.factory_id),
-        effective_factory_id=manager.factory_id,
-        pl_scope=ProductLineScope("EXPLICIT", [LINE_A, LINE_B]),
-        user=manager,
-    )
+    scope = await _manager_scope(db, manager)
     period = current_period()
     for line in (LINE_A, LINE_B):
         await generate_snapshot(db, line, period, scope=scope, commit=False)
+
+
+async def verify(db: AsyncSession) -> None:
+    """Verify the actual heatmap read path in the Manager's factory and line scope."""
+    manager = await _preview_manager(db)
+    scope = await _manager_scope(db, manager)
+    period = current_period()
+    for line, expected in (
+        (LINE_A, {LINE_SUPPLIER: 1, MONTH_END_SUPPLIER: 0, NEXT_MONTH_SUPPLIER: 1}),
+        (LINE_B, {LINE_SUPPLIER: 2}),
+    ):
+        check_product_line_access(line, scope)
+        heatmap = await get_heatmap_data(db, line, period, scope=scope)
+        counts = {
+            row.supplier_name: cell.value
+            for row in heatmap.rows
+            for cell in row.cells
+            if cell.key == "open_scar_count"
+        }
+        for supplier, count in expected.items():
+            if counts.get(SUPPLIERS[supplier]) != count:
+                raise ValueError(f"PR 59 preview heatmap mismatch for {line}, {supplier}")

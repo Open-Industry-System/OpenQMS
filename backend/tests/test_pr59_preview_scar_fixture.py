@@ -1,10 +1,11 @@
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.core.factory_scope import get_user_product_line_codes
 from app.models.role import RoleDefinition
 from app.models.supplier import Supplier, SupplierSCAR
 from app.models.supplier_risk import SupplierRiskConfig
+from app.models.supply_chain_risk_map import SupplyChainRiskSnapshot
 from app.models.user import User
 from app.preview_fixtures.pr_59 import (
     LINE_A,
@@ -14,6 +15,7 @@ from app.preview_fixtures.pr_59 import (
     NEXT_MONTH_SUPPLIER,
     SUPPLIERS,
     seed,
+    verify,
 )
 from app.services.supply_chain_risk_map.aggregator import aggregate_supply_chain_metrics
 from app.services.supply_chain_risk_map.service import current_period, get_heatmap_data
@@ -83,3 +85,12 @@ async def test_pr59_scar_fixture_cases_are_repeatable_and_manager_can_select_bot
             for row in result.rows
         }
         assert {supplier_no: counts[SUPPLIERS[supplier_no]] for supplier_no in expected} == expected
+
+    await verify(db)
+    await db.execute(delete(SupplyChainRiskSnapshot).where(SupplyChainRiskSnapshot.product_line_code == LINE_B))
+    # The raw SCARs still exist, so this is the same failure as the empty preview page.
+    assert await db.scalar(
+        select(func.count()).select_from(SupplierSCAR).where(SupplierSCAR.product_line_code == LINE_B)
+    ) == 2
+    with pytest.raises(ValueError, match="heatmap mismatch for PR59-B"):
+        await verify(db)
