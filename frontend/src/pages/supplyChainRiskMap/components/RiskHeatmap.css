@@ -1,0 +1,200 @@
+.risk-heatmap {
+  container-type: inline-size;
+  min-inline-size: 0;
+}
+
+.risk-heatmap__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0 0 0.875rem;
+  padding: 0;
+  color: var(--qf-text-secondary);
+  font-size: 0.8125rem;
+  list-style: none;
+}
+
+.risk-heatmap__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.risk-heatmap__swatch {
+  inline-size: 0.625rem;
+  block-size: 0.625rem;
+  border-radius: 0.1875rem;
+  background: var(--risk-accent);
+}
+
+.risk-heatmap__scroll {
+  overflow: auto;
+  max-block-size: min(64vh, 38rem);
+  border: 1px solid var(--qf-border);
+  border-radius: var(--qf-radius-md);
+  background: var(--qf-bg-panel);
+}
+
+.risk-heatmap__table {
+  --risk-name-width: clamp(4.5rem, 32cqi, 14rem);
+  inline-size: 100%;
+  min-inline-size: calc(var(--risk-name-width) + var(--risk-column-count) * 5.5rem);
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: var(--qf-text-primary);
+}
+
+.risk-heatmap__supplier-width {
+  inline-size: var(--risk-name-width);
+}
+
+.risk-heatmap__table th,
+.risk-heatmap__table td {
+  padding: 0.375rem;
+  border-block-end: 1px solid var(--qf-border);
+}
+
+.risk-heatmap__table thead th {
+  position: sticky;
+  z-index: 2;
+  inset-block-start: 0;
+  padding: 0.75rem 0.375rem;
+  background: var(--qf-bg-elevated);
+  color: var(--qf-text-primary);
+  font-size: 0.875rem;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.risk-heatmap__table .risk-heatmap__supplier {
+  position: sticky;
+  z-index: 1;
+  inset-inline-start: 0;
+  padding-inline: 0.75rem;
+  border-inline-end: 1px solid var(--qf-border);
+  background: var(--qf-bg-panel);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.risk-heatmap__table thead .risk-heatmap__supplier {
+  z-index: 3;
+  background: var(--qf-bg-elevated);
+}
+
+.risk-heatmap__table tbody tr:last-child > * {
+  border-block-end: 0;
+}
+
+.risk-heatmap__table tbody tr[data-selected="true"] {
+  background: var(--qf-bg-elevated);
+}
+
+.risk-heatmap__table tbody tr[data-selected="true"] .risk-heatmap__supplier {
+  background: var(--qf-bg-elevated);
+  box-shadow: inset 3px 0 var(--qf-cyan);
+}
+
+.risk-heatmap__name,
+.risk-heatmap__value {
+  display: block;
+  inline-size: 100%;
+  border: 0;
+  border-radius: 0.375rem;
+  font: inherit;
+}
+
+.risk-heatmap__name {
+  padding: 0.375rem 0;
+  background: transparent;
+  color: inherit;
+  font-weight: 600;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.risk-heatmap__name:hover,
+.risk-heatmap__name[aria-pressed="true"] {
+  color: var(--qf-cyan);
+}
+
+.risk-heatmap__value {
+  min-block-size: 2.5rem;
+  padding: 0.5rem 0.25rem;
+  background: var(--risk-fill);
+  color: var(--risk-text);
+  font-size: 1rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+button.risk-heatmap__value,
+.risk-heatmap__name {
+  cursor: pointer;
+}
+
+button.risk-heatmap__value:hover,
+.risk-heatmap__value[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--risk-accent);
+}
+
+.risk-heatmap__scroll:focus-visible,
+.risk-heatmap button:focus-visible {
+  outline: 2px solid var(--qf-cyan);
+  outline-offset: -2px;
+}
+
+.risk-heatmap [data-tone="low"] {
+  --risk-fill: #17362e;
+  --risk-text: #d2f8e4;
+  --risk-accent: #68cc9c;
+}
+
+.risk-heatmap [data-tone="medium"] {
+  --risk-fill: #3b321e;
+  --risk-text: #ffe5a5;
+  --risk-accent: #e5b95d;
+}
+
+.risk-heatmap [data-tone="high"] {
+  --risk-fill: #442c23;
+  --risk-text: #ffd7bf;
+  --risk-accent: #ef986a;
+}
+
+.risk-heatmap [data-tone="critical"] {
+  --risk-fill: #432631;
+  --risk-text: #ffd4de;
+  --risk-accent: #ee849e;
+}
+
+.risk-heatmap [data-tone="missing"],
+.risk-heatmap [data-tone="neutral"] {
+  --risk-fill: var(--qf-bg-elevated);
+  --risk-text: var(--qf-text-primary);
+  --risk-accent: #8b93a7;
+}
+
+.risk-heatmap [data-tone="missing"] {
+  --risk-text: #a5aec2;
+}
+
+@media (max-width: 768px) {
+  .qf-page.supply-chain-risk-map {
+    padding-inline: 0;
+  }
+
+  .risk-heatmap-card .qf-card__header,
+  .risk-heatmap-card .qf-card__body {
+    padding-inline: 0.75rem;
+  }
+}

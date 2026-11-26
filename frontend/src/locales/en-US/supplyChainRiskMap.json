@@ -58,6 +58,17 @@
     "clickSupplier": "Click a supplier to view details"
   },
   "heatmap": {
+    "title": "Supplier Risk Matrix",
+    "supplier": "Supplier",
+    "legend": "Risk levels",
+    "change": "Change from prior period: {{value}}",
+    "tones": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical",
+      "missing": "No data"
+    },
     "tooltipSource": "Source: {{source}}",
     "columns": {
       "risk_score": "Risk Score",

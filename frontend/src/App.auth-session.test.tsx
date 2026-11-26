@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Outlet } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import App from "./App";
 import i18n from "./i18n";
@@ -10,6 +10,18 @@ import { useAuthStore } from "./store/authStore";
 
 vi.mock("./hooks/usePermission", () => ({
   usePermission: () => ({ canView: () => true, isAdmin: false }),
+}));
+
+vi.mock("./components/layout/AppLayout", () => ({
+  default: () => <div data-testid="app-layout"><Outlet /></div>,
+}));
+
+vi.mock("./pages/supplierRisk/SupplierRiskPage", () => ({
+  default: () => <h1>Supplier risk alerts</h1>,
+}));
+
+vi.mock("./pages/supplierRisk/RiskConfigPage", () => ({
+  default: () => <h1>Supplier risk configuration</h1>,
 }));
 
 function jwt(payload: unknown) {
@@ -192,4 +204,18 @@ describe("public route boundary", () => {
     renderAt("/dashboard");
     expect(await screen.findByRole("button", { name: /login/i })).toBeInTheDocument();
   });
+});
+
+it.each([
+  ["/supplier-risk", "Supplier risk alerts"],
+  ["/supplier-risk/config", "Supplier risk configuration"],
+])("renders %s inside exactly one app layout", async (path, heading) => {
+  const token = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+  localStorage.setItem("access_token", token);
+  useAuthStore.setState({ token, user: bob });
+
+  renderAt(path);
+
+  expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+  expect(screen.getAllByTestId("app-layout")).toHaveLength(1);
 });

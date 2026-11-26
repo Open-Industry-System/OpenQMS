@@ -7,6 +7,7 @@ the global LLM and embedding provider instances so changes take effect immediate
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -146,31 +147,71 @@ async def update_ai_config(
             proposed[key] = value if value not in (None, "") else _env_default(key)
 
     def destinations(values):
-        llm_provider = values["llm_provider"]
-        llm_url = values["llm_base_url"] or "https://api.openai.com"
-        if llm_provider == "claude":
-            llm_url = "https://api.anthropic.com"
+        raw_llm_provider = values["llm_provider"]
+        # The agent adapter lowercases provider names and also supports SDK
+        # aliases. Both it and the global factories delegate missing URLs to
+        # the SDK, whose environment override precedes its hardcoded default.
+        llm_provider = raw_llm_provider.lower()
+        if llm_provider in ("claude", "anthropic"):
+            llm_provider = "anthropic"
+            llm_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+        else:
+            if llm_provider in ("openai", "deepseek", "ark"):
+                llm_provider = "openai"
+            llm_url = values["llm_base_url"] or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         # Embedding factory strips both explicit and fallback provider names;
-        # LLM factory compares its own name verbatim. Match both consumers.
-        emb_provider = values["embedding_provider"].strip() or llm_provider.strip()
-        emb_url = values["embedding_base_url"] or values["llm_base_url"] or "https://api.openai.com"
+        # unlike the agent adapter, it does not lowercase them. E2E's implicit
+        # hash provider never consumes a key, even if LLM_PROVIDER is OpenAI.
+        explicit_emb_provider = values["embedding_provider"].strip()
+        emb_provider = explicit_emb_provider or raw_llm_provider.strip()
+        if explicit_emb_provider in ("hash", "e2e", "deterministic") or (
+            settings.E2E_MODE and not explicit_emb_provider
+        ):
+            emb_provider = "hash"
+        emb_url = values["embedding_base_url"] or values["llm_base_url"] or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         return {
-            "llm": (llm_provider, canonical_origin(llm_url)),
-            "embedding": (emb_provider, canonical_origin(emb_url)),
+            "llm": (llm_provider, canonical_origin(llm_url)
+                    if llm_provider in ("openai", "anthropic") else None),
+            "embedding": (emb_provider, canonical_origin(emb_url)
+                          if emb_provider == "openai" else None),
         }
 
     old_destinations, new_destinations = destinations(current), destinations(proposed)
+    current_key_sources = {
+        key: (key, "db" if key in existing and existing[key].value else "env")
+        for key in _KEYS_NEVER_LOGGED
+    }
+    proposed_key_sources = {
+        key: current_key_sources[key] if payload[key] == MASKED_VALUE
+        else (key, "env" if payload[key] in (None, "") else "request")
+        for key in _KEYS_NEVER_LOGGED
+    }
+
+    def effective_key(values, prefix):
+        key = prefix + "_api_key"
+        if prefix == "embedding" and not values[key]:
+            return "llm_api_key"
+        return key
+
+    key_consumers = {"llm": ("openai", "anthropic"), "embedding": ("openai",)}
+    old_bindings = {
+        (current_key_sources[effective_key(current, prefix)], old_destinations[prefix])
+        for prefix in ("llm", "embedding")
+        if current[effective_key(current, prefix)]
+        and old_destinations[prefix][0] in key_consumers[prefix]
+    }
     for prefix in ("llm", "embedding"):
         old_destination, new_destination = old_destinations[prefix], new_destinations[prefix]
-        # Local providers do not consume API keys. For OpenAI embeddings an
-        # empty embedding key falls back to LLM_API_KEY, also checked here.
-        secret_key = prefix + "_api_key"
-        if prefix == "embedding" and not proposed[secret_key]:
-            secret_key = "llm_api_key"
-        if (old_destination != new_destination and proposed[secret_key]
-                and new_destination[0] in ("openai", "claude")
-                and payload[secret_key] in (None, "", MASKED_VALUE)):
-            raise ValueError("Changing an AI provider origin requires explicit API key re-entry")
+        secret_key = effective_key(proposed, prefix)
+        # A stable URL can still select a different hidden credential: clearing
+        # an embedding key may enable LLM-key or environment-key fallback.
+        # Only reuse a hidden credential at a destination it already served.
+        hidden_binding = (proposed_key_sources[secret_key], new_destination)
+        if (proposed[secret_key] and new_destination[0] in key_consumers[prefix]
+                and payload[secret_key] in (None, "", MASKED_VALUE)
+                and ((old_destination != new_destination and old_destination[0] in key_consumers[prefix])
+                     or hidden_binding not in old_bindings)):
+            raise ValueError("Changing an AI provider origin or credential source requires explicit API key re-entry")
     for key in AI_CONFIG_KEYS:
         value = payload.get(key)
 
