@@ -18,6 +18,11 @@ ACCEPT = 'Preview human acceptance'
 START = '<!-- preview-test-plan:start -->'
 END = '<!-- preview-test-plan:end -->'
 NOTICE = '<!-- openqms-preview-notice -->'
+DEPLOYMENT_MARKER = re.compile(r'<!-- openqms-preview-deployment:([0-9a-f]{40}):([1-9][0-9]*) -->')
+SHARED_ACTIVE_MARKER = re.compile(
+    r'<!-- openqms-shared-test-active:([0-9a-f]{40}):([0-9a-f]{40}):'
+    r'([0-9a-f]{64}):[0-9a-f]{32} -->'
+)
 PREVIEW_WORKFLOW = 'oracle-deploy.yml'
 SHARED_TEST_WORKFLOW = 'oracle-shared-test.yml'
 SHARED_TEST_URL = 'https://test.preview.openqms.smartindustry.world'
@@ -207,7 +212,7 @@ class API:
                        input=json.dumps(payload).encode(), stdout=subprocess.DEVNULL, check=True)
 
 
-    def notice(self, number, body, create=True):
+    def notice(self, number, body, create=True, *, replace_if=None):
         comments = self.pages(f'/issues/{number}/comments')
         owned = [c for c in comments if c.get('user', {}).get('login') == 'github-actions[bot]'
                  and c.get('user', {}).get('type') == 'Bot' and (c.get('body') or '').startswith(NOTICE)]
@@ -216,6 +221,8 @@ class API:
         if owned and owned[0]['body'] == body:
             return
         if not owned and not create:
+            return
+        if replace_if is not None and (not owned or not replace_if(owned[0]['body'])):
             return
         path = f'/issues/comments/{owned[0]["id"]}' if owned else f'/issues/{number}/comments'
         method = 'PATCH' if owned else 'POST'
@@ -267,7 +274,7 @@ def latest_notified_deployment(api, pr):
     workflow = SHARED_TEST_WORKFLOW if shared_test_enabled() else PREVIEW_WORKFLOW
     other = PREVIEW_WORKFLOW if shared_test_enabled() else SHARED_TEST_WORKFLOW
     for body in bot_notices(api, pr['number']):
-        match = re.search(r'<!-- openqms-preview-deployment:([0-9a-f]{40}):([1-9][0-9]*) -->', body)
+        match = DEPLOYMENT_MARKER.search(body)
         if match and match[1] == pr['head']['sha']:
             run = api.get(f'/actions/runs/{match[2]}')
             if accepts_workflow_source(run, other):
@@ -641,6 +648,35 @@ def shared_release_marker(api, pr, digest):
     return None
 
 
+def invalidate_shared_notice(api, pr, digest, waiting):
+    number = pr['number']
+    head = pr['head']['sha']
+    merge = pr['merge_commit_sha']
+
+    def superseded(body):
+        if active := SHARED_ACTIVE_MARKER.search(body):
+            return active[1] != head or (merge is not None and active[2] != merge) or active[3] != digest
+        if deployment := DEPLOYMENT_MARKER.search(body):
+            return deployment[1] != head
+        return False
+
+    if not any(superseded(body) for body in bot_notices(api, number)):
+        return
+
+    def replace(body):
+        # Re-read the bot comment and PR before replacing them: publication
+        # may have advanced while this reconciliation was reading metadata.
+        if not superseded(body):
+            return False
+        current = api.get(f'/pulls/{number}')
+        return (current['state'] == 'open'
+                and current['head']['sha'] == head
+                and current['merge_commit_sha'] == merge
+                and current.get('body') == pr.get('body'))
+
+    api.notice(number, waiting, create=False, replace_if=replace)
+
+
 def reconcile(api, pr, summary):
     sha = pr['head']['sha']
     api.status(sha, PLAN, 'pending', '正在检查 PR 验收计划')
@@ -648,7 +684,8 @@ def reconcile(api, pr, summary):
     shared = shared_test_enabled()
     waiting = f'{NOTICE}\n### 等待 CI 与预览部署\n\n当前提交：`{sha}`。预览尚未就绪，请等待发布完成。\n\n'
     if shared:
-        waiting += '共享测试位将按 PR 编号发放，轮到本 PR 时会显示可用地址。\n\n'
+        waiting += ('上一轮验收已失效。共享测试位部署当前版本后，'
+                    '本评论会显示测试地址和新的验收命令。\n\n')
     else:
         waiting += f'预期地址：{preview_url(pr["number"], False)}\n\n'
     waiting += f'[CI 检查](https://github.com/{api.repo}/pull/{pr["number"]}/checks)'
@@ -657,10 +694,14 @@ def reconcile(api, pr, summary):
     except ValueError as error:
         api.status(sha, PLAN, 'failure', str(error))
         summary.append(f'PR #{pr["number"]}: {error}')
-        if not shared:
+        if shared:
+            invalidate_shared_notice(api, pr, None, waiting)
+        else:
             api.notice(pr['number'], waiting)
         return
     api.status(sha, PLAN, 'success', '验收计划齐全，专项种子文件（如需）已核对')
+    if shared:
+        invalidate_shared_notice(api, pr, digest, waiting)
     if shared and (released := shared_release_marker(api, pr, digest)):
         reason = '本轮测试位已清理，等待重新部署后验收'
         if released['outcome'] == 'passed':
