@@ -82,7 +82,7 @@ def queue_call(payload):
     context = RELEASE['validate'](context)
     args = RELEASE['ssh_args'](context) + [context['ORACLE_SSH_TARGET'], 'preview queue']
     result = subprocess.run(args, input=json.dumps(payload).encode(),
-                            capture_output=True, timeout=300)
+                            capture_output=True, timeout=930 if payload['action'] == 'prepare-d4' else 300)
     if result.returncode:
         raise RuntimeError(f'Oracle shared test queue {payload["action"]} rejected')
     if len(result.stdout) > 4096:
@@ -141,6 +141,54 @@ def public_health(slot):
             if time.monotonic() >= until:
                 raise
             time.sleep(3)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def published_endpoint(url, slot, *, html=False, require_lease=False):
+    request = urllib.request.Request(url, method='GET', headers={'User-Agent': 'OpenQMS-Preview-Health/1.0'})
+    try:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        with opener.open(request, timeout=15) as response:
+            return (response.url == url and response.status == 200
+                    and response.headers.get('X-OpenQMS-Test-PR') == str(slot['pr'])
+                    and response.headers.get('X-OpenQMS-Test-Version') == slot['merge']
+                    and (not html or response.headers.get_content_type() == 'text/html')
+                    and (not require_lease or response.headers.get('X-OpenQMS-Test-Lease') == slot['lease']))
+    except (urllib.error.URLError, TimeoutError):
+        return False
+
+
+def prepare_environment(host, slot, plan):
+    roles = ACCEPTANCE['d4_roles'](plan)
+    if not roles and not plan.checkpoints:
+        return None
+
+    origin = shared_origin()
+    available = {
+        path for path in set(plan.checkpoints.values())
+        if published_endpoint(origin + path, slot, html=True)
+    }
+    environment = {'checkpoints': sorted(item for item, path in plan.checkpoints.items() if path in available)}
+    if roles:
+        try:
+            d4 = host(dict(action='prepare-d4', lease=slot['lease'], roles=roles))
+        except RuntimeError:
+            d4 = dict(state='blocked', reason='controller-unavailable')
+        except subprocess.TimeoutExpired:
+            d4 = dict(state='blocked', reason='provider-failed')
+        if not ACCEPTANCE['valid_d4_preparation'](d4, roles, origin):
+            d4 = dict(state='blocked', reason='provider-failed')
+        if d4['state'] == 'ready':
+            if d4['expires_at'] <= int(time.time()):
+                d4 = dict(state='blocked', reason='allocation-expired')
+            elif not published_endpoint(d4['url'] + 'healthz', slot, require_lease=True):
+                d4 = dict(state='blocked', reason='portal-unavailable')
+        environment['d4'] = d4
+    return environment
 
 
 def publication_receipt(api, slot):
@@ -211,20 +259,24 @@ def reconcile(api, get_eligible, host, deploy_release, check_health, evidence_fi
         raise RuntimeError('unexpected Oracle shared test phase')
     check_health(slot)
     published = ACCEPTANCE['publication'](api, pr, queue_lease=slot['lease'])
-    if published is None:
+    prior = published['shared_test'] if published else {}
+    plan = ACCEPTANCE['parse_plan'](pr.get('body'))
+    environment = prepare_environment(host, slot, plan)
+    if published is None or prior.get('acceptance_environment') != environment:
         if 'test_roles' not in slot:
             slot = host(dict(action='ready', lease=slot['lease'], eligible=versions))
-        evidence_file.write_text(json.dumps(publication_receipt(api, slot)))
+        receipt = publication_receipt(api, slot)
+        if environment is not None:
+            receipt['acceptance_environment'] = environment
+        evidence_file.write_text(json.dumps(receipt))
     else:
-        if d4_file is not None:
-            plan = ACCEPTANCE['parse_plan'](pr.get('body'))
+        d4 = (environment or {}).get('d4')
+        if d4_file is not None and d4 and d4['state'] == 'ready' and not published.get('d4_evidence'):
             required = ACCEPTANCE['d4_scenarios'](plan)
-            if required and not published.get('d4_evidence'):
-                proofs = host(dict(action='d4-evidence', lease=slot['lease']))
-                receipt = published['shared_test']
-                if ACCEPTANCE['valid_d4_evidence'](proofs) and required <= proofs.keys():
-                    payload = dict(receipt, proofs=proofs, deployment_run=published['id'])
-                    d4_file.write_text(json.dumps(payload))
+            proofs = host(dict(action='d4-evidence', lease=slot['lease']))
+            if ACCEPTANCE['valid_d4_evidence'](proofs) and required <= proofs.keys():
+                payload = dict(prior, proofs=proofs, deployment_run=published['id'])
+                d4_file.write_text(json.dumps(payload))
         ACCEPTANCE['shared_test_ready_notice'](api, pr, published, slot['plan'])
     print(f'PR #{slot["pr"]} occupies the shared test slot')
 

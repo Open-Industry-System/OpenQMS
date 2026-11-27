@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Trusted metadata-only PR plan and human preview acceptance statuses."""
 import argparse
+import base64
 from collections import Counter
 from datetime import datetime, timezone
 import hashlib
@@ -29,6 +30,21 @@ SHARED_TEST_URL = 'https://test.preview.openqms.smartindustry.world'
 MAC_SHARED_TEST_URL = 'https://test-openqms.smartindustry.world'
 SHARED_TEST_ARTIFACT = 'shared-test-publication'
 D4_ARTIFACT = 'shared-test-d4-evidence'
+D4_PORTALS = {
+    SHARED_TEST_URL: 'https://d4.preview.openqms.smartindustry.world/',
+    MAC_SHARED_TEST_URL: 'https://d4-test-openqms.smartindustry.world/',
+}
+D4_BLOCKED = {
+    'controller-unavailable': '共享测试主机尚未安装验收部署控制器，平台维护人员需要同步受信主线',
+    'provider-unavailable': '共享测试主机尚未安装 D4 服务，平台维护人员需要安装受审服务包',
+    'provider-unconfigured': 'D4 服务尚未配置本机入口和已审核运行包',
+    'runtime-unavailable': '共享测试主机缺少已审核的 Linux 接收程序或镜像',
+    'role-unavailable': '本轮缺少验收计划要求的业务账号',
+    'provider-failed': 'D4 服务发放异常，请查看共享测试工作流',
+    'allocation-failed': '本轮合成任务或专用运行资源发放失败',
+    'allocation-expired': '本轮 D4 专用账号和任务已到期，需重新发放',
+    'portal-unavailable': '本轮 D4 HTTPS 入口尚未通过版本和连通性检查',
+}
 
 
 def shared_test_enabled():
@@ -59,6 +75,10 @@ LEGACY_HEADER = ('检查项', '操作步骤', '预期结果')
 ITEM_HEADER = ('编号', '检查项', '环境', '角色', '场景', '操作步骤', '预期结果')
 PUBLIC_SCENARIOS = {'read-only'}
 SHARED_SCENARIOS = {'write', 'd4-deliver', 'd4-revoke'}
+D4_SCENARIOS = {'d4-deliver', 'd4-revoke'}
+CHECKPOINT = re.compile(
+    r'<!-- openqms-preview-checkpoint: ([a-z][a-z0-9-]{0,39}) (/[A-Za-z0-9/_-]{1,160}) -->'
+)
 FIXTURE_DECLARATION = re.compile(r'<!-- openqms-preview-fixture: (none|required) -->')
 RESULT_LINE = re.compile(r'([a-z][a-z0-9-]{0,39})\s*[:：]\s*(通过|失败|受阻)')
 
@@ -76,6 +96,7 @@ class AcceptancePlan(NamedTuple):
     items: tuple[AcceptanceItem, ...]
     classified: bool
     fixture_required: bool
+    checkpoints: dict[str, str]
 
 
 def parse_plan(body):
@@ -106,11 +127,21 @@ def parse_plan(body):
         raise ValueError('验收表格分隔行不正确')
     if any(len(cell) < 2 for row in rows[2:] for cell in (row[-2], row[-1])):
         raise ValueError('每条验收步骤都须填写操作和预期结果')
+    checkpoint_rows = CHECKPOINT.findall(sections[4])
+    checkpoints = dict(checkpoint_rows)
+    if (plan.count('<!-- openqms-preview-checkpoint') != len(checkpoint_rows)
+            or len(checkpoints) != len(checkpoint_rows)
+            or any('//' in path or path.startswith(('/api/', '/assets/'))
+                   or path in ('/api', '/assets') for path in checkpoints.values())):
+        raise ValueError('验收检查点须使用唯一编号和本站页面路径，例如 /supply-chain-risk-map')
+
     digest = hashlib.sha256(plan.encode()).hexdigest()
     if rows[0] == LEGACY_HEADER:
         if any(len(row[0]) < 2 for row in rows[2:]):
             raise ValueError('每条验收步骤都须填写检查项')
-        return AcceptancePlan(digest, (), False, fixture_required)
+        if checkpoints:
+            raise ValueError('声明验收检查点前，须使用带编号、环境和角色的验收表格')
+        return AcceptancePlan(digest, (), False, fixture_required, {})
 
     items = []
     ids = set()
@@ -125,7 +156,13 @@ def parse_plan(body):
             raise ValueError('验收项环境、角色和场景不匹配，请使用 PR 模板中的组合')
         ids.add(item_id)
         items.append(AcceptanceItem(item_id, title, environment, role, scenario))
-    return AcceptancePlan(digest, tuple(items), True, fixture_required)
+    if checkpoints.keys() - ids or any(
+            item.id in checkpoints and item.scenario in D4_SCENARIOS for item in items):
+        raise ValueError('检查点须对应计划中的非 D4 项目，D4 入口由部署流程分配')
+    d4 = [item.scenario for item in items if item.scenario in D4_SCENARIOS]
+    if len(d4) != len(set(d4)):
+        raise ValueError('每个 D4 场景须在验收计划中唯一声明')
+    return AcceptancePlan(digest, tuple(items), True, fixture_required, checkpoints)
 
 
 def test_plan(body):
@@ -134,8 +171,34 @@ def test_plan(body):
     return parse_plan(body).digest
 
 
+def validate_checkpoint_routes(api, checkpoints, sha):
+    if not re.fullmatch('[0-9a-f]{40}', sha or ''):
+        raise ValueError('验收检查点缺少有效提交版本')
+    entry = api.get(f'/contents/frontend/src/App.tsx?ref={sha}')
+    try:
+        if entry.get('type') != 'file' or entry.get('encoding') != 'base64':
+            raise ValueError('invalid router metadata')
+        router = base64.b64decode(entry['content']).decode()
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError('无法读取当前版本的页面路由，验收检查点受阻') from error
+    routes = [
+        route.strip('/').split('/')
+        for route in re.findall(r'<Route\s+path="(/[^"]*)"', router)
+    ]
+    for item, path in checkpoints.items():
+        segments = path.strip('/').split('/')
+        if not any(len(route) == len(segments)
+                   and all(expected.startswith(':') or expected == actual
+                           for expected, actual in zip(route, segments)) for route in routes):
+            raise ValueError(f'{item}：当前版本未注册验收页面 {path}')
+
+
 def validate_plan(api, pr, *, merge_sha=None):
     plan = parse_plan(pr.get('body'))
+    if plan.checkpoints:
+        validate_checkpoint_routes(api, plan.checkpoints, pr['head']['sha'])
+        if merge_sha is not None and merge_sha != pr['head']['sha']:
+            validate_checkpoint_routes(api, plan.checkpoints, merge_sha)
     if not plan.fixture_required:
         return plan.digest
 
@@ -380,8 +443,24 @@ def shared_artifacts(api, name):
     raise ValueError('Too many shared test artifacts')
 
 
+def d4_roles(plan):
+    return {item.scenario: item.role for item in plan.items if item.scenario in D4_SCENARIOS}
+
+
 def d4_scenarios(plan):
-    return {item.scenario for item in plan.items if item.scenario.startswith('d4-')}
+    return set(d4_roles(plan))
+
+
+def valid_d4_preparation(d4, expected, origin):
+    if not isinstance(d4, dict):
+        return False
+    if d4.get('state') == 'blocked':
+        return (set(d4) == {'state', 'reason'} and isinstance(d4['reason'], str)
+                and d4['reason'] in D4_BLOCKED)
+    return (set(d4) == {'state', 'url', 'expires_at', 'scenarios'}
+            and d4['state'] == 'ready' and d4['url'] == D4_PORTALS[origin]
+            and type(d4['expires_at']) is int and 0 < d4['expires_at'] < 2**32
+            and d4['scenarios'] == sorted(expected))
 
 
 def valid_d4_evidence(proofs):
@@ -402,9 +481,15 @@ def shared_d4_evidence(api, receipt, deployment, required):
                 or shared_test_url(evidence) != shared_test_url(receipt)):
             continue
         proofs = evidence.get('proofs')
+        d4 = receipt.get('acceptance_environment', {}).get('d4')
+        # A human can operate the portal as soon as publication posts the link,
+        # before that Actions run completes. Match the issued window as well.
+        since = epoch(deployment['updated_at'])
+        if d4 and d4['state'] == 'ready':
+            since = d4['expires_at'] - 3600
         if (not valid_d4_evidence(proofs) or not required <= proofs.keys()
-                or any(proof['completed_at'] < epoch(deployment['updated_at'])
-                       or proof['completed_at'] > epoch(run['updated_at']) for proof in proofs.values())):
+                or any(proof['completed_at'] < since or proof['completed_at'] > epoch(run['updated_at'])
+                       or (d4 and proof['expires_at'] != d4.get('expires_at')) for proof in proofs.values())):
             continue
         return proofs
     return {}
@@ -423,9 +508,19 @@ def shared_publication(api, pr, queue_lease):
                 or (expires is not None and (type(expires) is not int or not 0 < expires < 2**32))):
             raise ValueError('Invalid shared test lease receipt')
         if receipt.get('plan') == plan.digest and (queue_lease is None or lease == queue_lease):
-            shared_test_url(receipt)
+            origin = shared_test_url(receipt)
+            if (environment := receipt.get('acceptance_environment')) is not None:
+                checkpoints = environment.get('checkpoints') if isinstance(environment, dict) else None
+                required = d4_scenarios(plan)
+                if (not isinstance(environment, dict) or not isinstance(checkpoints, list)
+                        or any(not isinstance(item, str) or item not in plan.checkpoints for item in checkpoints)
+                        or len(checkpoints) != len(set(checkpoints))
+                        or set(environment) != ({'checkpoints', 'd4'} if required else {'checkpoints'})
+                        or (required and not valid_d4_preparation(environment.get('d4'), required, origin))):
+                    raise ValueError('Invalid shared acceptance environment receipt')
             # Proofs can only come from the separately named trusted workflow artifact.
-            if required := d4_scenarios(plan):
+            d4 = (receipt.get('acceptance_environment') or {}).get('d4')
+            if (required := d4_scenarios(plan)) and (not d4 or d4['state'] == 'ready'):
                 run = dict(run, d4_evidence=shared_d4_evidence(api, receipt, run, required))
             return dict(run, shared_test=receipt)
     return None
@@ -540,23 +635,63 @@ def verified_acceptance(api, pr, run, digest, *, released_at=None):
     return comment
 
 
-def shared_blockers(plan, receipt, proofs=None, *, now=None):
+def shared_preparation_blockers(plan, receipt, *, now=None):
     if not plan.classified:
-        return ['计划需要逐项声明环境、角色和场景']
+        return {'plan': '计划需要逐项声明环境、角色和场景'}
     issued_roles = receipt.get('test_roles', [])
     if (not isinstance(issued_roles, list)
             or any(role not in ('field_qe', 'manager') for role in issued_roles)):
         issued_roles = []
-    proofs = proofs if proofs and valid_d4_evidence(proofs) else {}
-    blockers = []
+    environment = receipt.get('acceptance_environment') or {}
+    d4 = environment.get('d4')
+    blockers = {}
     for item in plan.items:
         if item.environment == 'shared' and item.role not in issued_roles:
-            blockers.append(f'{item.id}：需要发放本轮合成业务账号')
-        elif item.scenario.startswith('d4-'):
-            proof = proofs.get(item.scenario)
-            if proof is None or (now is not None and now >= proof['expires_at']):
-                blockers.append(f'{item.id}：需要经核验的 Linux receiver 及浏览器交付回执')
+            blockers[item.id] = '需要发放本轮合成业务账号'
+        elif item.id in plan.checkpoints and item.id not in environment.get('checkpoints', ()):
+            blockers[item.id] = '本轮验收检查点尚未通过页面和版本检查'
+        elif item.scenario in D4_SCENARIOS and d4:
+            if d4['state'] == 'blocked':
+                blockers[item.id] = D4_BLOCKED[d4['reason']]
+            elif now is not None and now >= d4['expires_at']:
+                blockers[item.id] = D4_BLOCKED['allocation-expired']
     return blockers
+
+
+def shared_blockers(plan, receipt, proofs=None, *, now=None):
+    blockers = shared_preparation_blockers(plan, receipt, now=now)
+    proofs = proofs if proofs and valid_d4_evidence(proofs) else {}
+    environment = receipt.get('acceptance_environment') or {}
+    for item in plan.items:
+        if item.id in blockers or item.scenario not in D4_SCENARIOS:
+            continue
+        proof = proofs.get(item.scenario)
+        if proof is None or (now is not None and now >= proof['expires_at']):
+            blockers[item.id] = ('等待验收人员在专用网页操作并生成回执' if environment.get('d4')
+                                 else '需要经核验的 Linux receiver 及浏览器交付回执')
+    return [f'{item}：{reason}' for item, reason in blockers.items()]
+
+
+def shared_checkpoint_lines(plan, receipt, proofs=None, *, now):
+    blocked = shared_preparation_blockers(plan, receipt, now=now)
+    environment = receipt.get('acceptance_environment') or {}
+    d4 = environment.get('d4')
+    origin = shared_test_url(receipt)
+    lines = []
+    for item in plan.items:
+        if reason := blocked.get(item.id):
+            lines.append(f'- `{item.id}` · 受阻 · {reason}')
+            continue
+        if item.scenario in D4_SCENARIOS and not d4:
+            state = '已收到操作回执' if item.scenario in (proofs or {}) else '受阻 · 尚无本轮 D4 入口发放记录'
+            lines.append(f'- `{item.id}` · {state}')
+            continue
+        url = d4['url'] if item.scenario in D4_SCENARIOS else origin + plan.checkpoints.get(item.id, '/')
+        state = '可以开始验收'
+        if item.scenario in (proofs or {}):
+            state = '已收到操作回执'
+        lines.append(f'- [`{item.id}`]({url}) · `{item.role}` · {state}')
+    return '\n'.join(lines)
 
 
 def shared_test_ready_notice(api, pr, run, digest):
@@ -570,18 +705,26 @@ def shared_test_ready_notice(api, pr, run, digest):
                 or epoch(run['updated_at']) <= retired['released_at']):
             return  # A poll cannot put a retired lease or older publication back.
     plan = parse_plan(pr.get('body'))
-    blockers = shared_blockers(plan, receipt, run.get('d4_evidence'),
-                               now=int(datetime.now(timezone.utc).timestamp()))
+    now = int(datetime.now(timezone.utc).timestamp())
+    proofs = run.get('d4_evidence')
+    blockers = shared_blockers(plan, receipt, proofs, now=now)
+    prepared = receipt.get('acceptance_environment')
     notice = ready_notice(pr, run, digest)
     if blockers:
-        # Keep the link for independently runnable checks, but do not offer a
-        # sign-off command until every required scenario has its environment.
         marker = shared_identity(receipt['head'], receipt['sha'], digest, receipt['queue_lease'])
+        environment_blocked = shared_preparation_blockers(plan, receipt, now=now)
+        waiting_for_browser = prepared and not environment_blocked
+        title = '测试环境已就绪，等待验收操作' if waiting_for_browser else '测试站点已就绪，部分验收受阻'
+        details = ('完成专用网页上的操作后，机器人会补上本轮验收命令。'
+                   if waiting_for_browser else '\n'.join(f'- {blocker}' for blocker in blockers) if not prepared else '')
         notice = (f'{NOTICE}\n{deployment_marker(receipt["head"], run["id"])}\n'
                   f'<!-- openqms-shared-test-active:{marker} -->\n'
-                  f'### PR #{pr["number"]} 测试站点已就绪，部分验收受阻\n\n'
-                  f'{shared_test_url(receipt)} · 当前版本 `{receipt["sha"]}`\n\n'
-                  + '\n'.join(f'- {blocker}' for blocker in blockers))
+                  f'### PR #{pr["number"]} {title}\n\n'
+                  f'{shared_test_url(receipt)} · 当前版本 `{receipt["sha"]}`')
+        if details:
+            notice += f'\n\n{details}'
+    if plan.classified and (prepared or not blockers):
+        notice += '\n\n' + shared_checkpoint_lines(plan, receipt, proofs, now=now)
     api.notice(pr['number'], notice)
 
 
@@ -740,12 +883,15 @@ def reconcile(api, pr, summary):
     if not same_release(api.get(f'/pulls/{pr["number"]}'), pr, digest):
         raise ValueError('PR changed before publication notification')
     receipt = run.get('shared_test')
-    if receipt and (blockers := shared_blockers(
-            parse_plan(pr.get('body')), receipt, run.get('d4_evidence'),
-            now=int(datetime.now(timezone.utc).timestamp()))):
-        api.status(sha, ACCEPT, 'pending', '本轮共享测试缺少必要验收能力')
-        summary.append(f'PR #{pr["number"]} 受阻：' + '、'.join(blockers))
-        return
+    if receipt:
+        plan = parse_plan(pr.get('body'))
+        now = int(datetime.now(timezone.utc).timestamp())
+        if blockers := shared_blockers(plan, receipt, run.get('d4_evidence'), now=now):
+            prepared = receipt.get('acceptance_environment') and not shared_preparation_blockers(plan, receipt, now=now)
+            status = '验收入口已就绪，等待浏览器操作回执' if prepared else '本轮共享测试缺少必要验收能力'
+            api.status(sha, ACCEPT, 'pending', status)
+            summary.append(f'PR #{pr["number"]} {status}：' + '、'.join(blockers))
+            return
     if not shared:
         api.notice(pr['number'], ready_notice(pr, run, digest))
     template = acceptance_template(pr, run, digest)

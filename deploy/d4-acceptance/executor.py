@@ -47,14 +47,15 @@ def load_profile(path):
     if set(profile) != {'binding', 'portal_uid', 'portal_gid', 'cases'}:
         raise ValueError('invalid D4 profile fields')
     validate_binding(profile['binding'])
-    if set(profile['cases']) != set(SCENARIOS):
-        raise ValueError('expected exactly two prepared D4 cases')
+    cases_by_scenario = profile['cases']
+    if not isinstance(cases_by_scenario, dict) or not cases_by_scenario or not cases_by_scenario.keys() <= SCENARIOS.keys():
+        raise ValueError('expected prepared D4 cases for the requested scenarios')
     for field in ('portal_uid', 'portal_gid'):
         if type(profile[field]) is not int or profile[field] <= 0:
             raise ValueError('dedicated non-root portal identity required')
-    cases = tuple(profile['cases'].values())
+    cases = cases_by_scenario.values()
     for field in ('api_container_id', 'task_id', 'db_container_id'):
-        if cases[0][field] == cases[1][field]:
+        if len({case[field] for case in cases}) != len(cases_by_scenario):
             raise ValueError('D4 scenarios require independently prepared runtime identities')
     return profile
 
@@ -108,7 +109,8 @@ class Executor:
         if payload['binding'] != self.profile['binding']:
             raise ValueError('request does not match the prepared test allocation')
         scenario, operation = payload['scenario'], payload['operation']
-        if scenario not in SCENARIOS or not isinstance(operation, str) or not re.fullmatch('[a-f0-9]{32}', operation):
+        if (not isinstance(scenario, str) or scenario not in self.profile['cases']
+                or not isinstance(operation, str) or not re.fullmatch('[a-f0-9]{32}', operation)):
             raise ValueError('invalid D4 browser action')
         binding = self.profile['binding']
         with self.guard():

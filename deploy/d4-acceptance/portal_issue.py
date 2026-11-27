@@ -8,6 +8,7 @@ from pathlib import Path
 import runpy
 import secrets
 import sys
+import tempfile
 
 from browser import SHARED_ACCOUNT_ROLES, validate_config
 from cleanup import RUN_ROOT, database_binding
@@ -33,29 +34,42 @@ def shared_passwords(binding):
 
 
 def write_private(path, data):
-    descriptor = os.open(path, os.O_WRONLY | os.O_NOFOLLOW | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, 'w') as stream:
-        json.dump(data, stream, separators=(',', ':'))
-        stream.flush()
-        os.fsync(stream.fileno())
+    # Callers hold the queue lock and use an already validated private parent.
+    descriptor, name = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, 'w') as stream:
+            json.dump(data, stream, separators=(',', ':'))
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.path.lexists(path):
+            raise FileExistsError('D4 private record already exists')
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
-def issue(profile_path, origin, *, scenario_roles):
+def issue(profile_path, origin, *, scenario_roles, guard=None):
     lease = profile_path.parent.name
     if profile_path != QUEUE_ROOT / 'd4' / lease / 'profile.json':
         raise ValueError('fixed D4 profile path required')
-    with hold_test_slot():
+    with (guard or hold_test_slot)():
         trusted_directory(profile_path.parent, private=True)
         profile = load_profile(profile_path)
         binding = profile['binding']
+        if scenario_roles.keys() != profile['cases'].keys():
+            raise ValueError('D4 portal roles do not match the provisioned scenarios')
         slot = database_binding(lease, 'testing')
         if any(binding[key] != slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease')):
             raise ValueError('D4 profile does not match the active test slot')
 
         directory = RUN_ROOT / lease
         credential = profile_path.parent / 'portal-credential.json'
-        if directory.exists() or directory.is_symlink() or credential.exists() or credential.is_symlink():
+        target = directory / 'portal.json'
+        if os.path.lexists(target) or os.path.lexists(credential):
             raise ValueError('D4 portal has already been issued')
+        if os.path.lexists(directory):
+            trusted_directory(directory, private=True)
         passwords = shared_passwords(binding)
         accounts = {}
         for username, role in SHARED_ACCOUNT_ROLES.items():
@@ -70,9 +84,9 @@ def issue(profile_path, origin, *, scenario_roles):
         # PID 1 reads the root-protected config as a service credential and
         # presents a read-only copy owned by the unprivileged browser service.
         trusted_directory(RUN_ROOT, private=True)
-        directory.mkdir(mode=0o700)
+        directory.mkdir(mode=0o700, exist_ok=True)
         root_private(directory, directory=True)
-        write_private(directory / 'portal.json', config)
+        write_private(target, config)
 
 
 def main():
