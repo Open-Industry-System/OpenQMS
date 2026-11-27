@@ -3,6 +3,7 @@
 import argparse
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import time
 
+from browser import validate_binding
 from executor import QUEUE_ROOT, root_private, socket_path_for
 from runtime_launch import (
     HEX64, NONCE_LABEL, SYSTEMCTL, RuntimeLaunch, decode, read_owned, require,
@@ -121,15 +123,28 @@ def native_runtimes(allocation, binding):
         return ()
     require(all(profile['binding'][key] == binding[key] for key in ('pr', 'head', 'merge', 'plan', 'lease')),
             'D4 cleanup launch profile belongs to another release')
-    require(set(profile['cases']) == {'d4-deliver', 'd4-revoke'}, 'D4 cleanup cases missing')
-    case = profile['cases']['d4-deliver']
+    require(bool(profile['cases']) and set(profile['cases']) <= {'d4-deliver', 'd4-revoke'},
+            'D4 cleanup cases missing')
+    case = profile['cases'].get('d4-deliver')
+    if case is None:
+        return ()
     runtime = RuntimeLaunch(case['root'], case['manifest_sha256'], case['nonce'], case['api_container_id'])
     require(runtime.root == Path('/run/openqms-d4-' + runtime.nonce), 'D4 cleanup native root mismatch')
     return (runtime,)
 
 
+def runtime_staging_path(runtime):
+    return runtime.with_name('.' + runtime.name + '.preparing')
+
+
 def reclaim_runtime(runtime, run):
     owner = f'{NONCE_LABEL}={runtime.nonce}'
+    staging = runtime_staging_path(runtime.root)
+    if os.path.lexists(staging):
+        trusted_directory(staging, private=True)
+        require(not os.path.lexists(runtime.root) and not objects('container', owner, run),
+                'incomplete D4 runtime is already active')
+        shutil.rmtree(staging)
     if not runtime.root.exists() and not runtime.root.is_symlink():
         require(not objects('container', owner, run), 'D4 receiver remains without its runtime root')
         return
@@ -146,9 +161,18 @@ def reclaim_runtime(runtime, run):
     shutil.rmtree(runtime.root)
 
 
-def cleanup(lease, *, run=command):
+def verify_testing_cleanup(allocation, slot):
+    profile = decode(read_owned(allocation / 'profile.json', 32768, private=True))
+    binding = profile['binding']
+    validate_binding(binding, now=binding['issued_at'])
+    require(all(binding[key] == slot[key] for key in ('pr', 'head', 'merge', 'plan', 'lease'))
+            and binding['expires_at'] <= time.time(), 'active D4 portal requires lease retirement or expiry')
+
+
+def cleanup(lease, *, run=command, phase='releasing'):
     require(isinstance(lease, str) and re.fullmatch('[a-f0-9]{32}', lease), 'invalid D4 cleanup lease')
-    binding = database_binding(lease, 'releasing')
+    require(phase in {'releasing', 'testing'}, 'invalid D4 cleanup phase')
+    binding = database_binding(lease, phase)
     allocation = QUEUE_ROOT / 'd4' / lease
     if not allocation.exists() and not allocation.is_symlink():
         return
@@ -157,6 +181,8 @@ def cleanup(lease, *, run=command):
     has_portal = portal.exists() or portal.is_symlink()
     if has_portal:
         trusted_directory(portal, private=True)
+        if phase == 'testing':
+            verify_testing_cleanup(allocation, binding)
     runtimes = native_runtimes(allocation, binding)
     # Validate the complete application inventory before making any change.
     docker_inventory(lease, run)

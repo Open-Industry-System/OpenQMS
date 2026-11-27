@@ -56,6 +56,8 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
         return dict(slot, test_roles=['field_qe', 'manager']) if action == 'ready' else slot
 
     callbacks = {
+        **client['ACCEPTANCE'],
+        'parse_plan': lambda body: client['ACCEPTANCE']['AcceptancePlan']('c' * 64, (), False, False, {}),
         'deployment_notice': lambda api, pr, *args, **kwargs: events.append(('start', pr)),
         'publication': lambda api, pr, queue_lease: published.get(queue_lease),
         'shared_test_ready_notice': lambda api, pr, run, plan: api.notice(pr['number'], f'ready {pr["number"]}'),
@@ -78,7 +80,7 @@ def test_existing_prs_have_one_slot_and_confirmation_releases_before_next(tmp_pa
     assert first['sha'] == next_candidates[1][0]['merge']
     assert first['url'] == client[origin]
     assert events == [('start', 45), ('deploy', 45, 145), ('health', 45)]
-    published[first['queue_lease']] = {'id': 12}
+    published[first['queue_lease']] = {'id': 12, 'shared_test': first}
 
     reconcile()
     assert events[3:] == [('health', 45)]

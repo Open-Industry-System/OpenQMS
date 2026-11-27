@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Root-side shared-test control. Caller holds both Oracle deployment locks."""
+"""Root-side shared-test control."""
 from hashlib import sha256
 import json
 import os
@@ -14,6 +14,17 @@ MODE = Path('/var/lib/openqms-shared-test')
 HOST = 'test.preview.openqms.smartindustry.world'
 MAC_ORIGIN = 'http://test-openqms.smartindustry.world:8080'
 D4_CLEANUP = Path('/usr/local/lib/openqms/d4-acceptance/cleanup.py')
+D4_PREPARE = D4_CLEANUP.with_name('prepare_preview.py')
+D4_ORACLE_URL = 'https://d4.preview.openqms.smartindustry.world/'
+D4_MAC_URL = 'https://d4-test-openqms.smartindustry.world/'
+D4_SCENARIOS = {'d4-deliver', 'd4-revoke'}
+D4_ROLES = {'field_qe', 'manager'}
+D4_BLOCKERS = {
+    'provider-unavailable', 'provider-failed', 'role-unavailable',
+    'provider-unconfigured', 'runtime-unavailable', 'allocation-failed',
+    'portal-unavailable', 'allocation-expired',
+}
+D4_PREPARE_TIMEOUT = 900
 LEASE = re.compile(r'[0-9a-f]{32}')
 REQUEST_LIMIT = 128 * 1024
 
@@ -21,6 +32,7 @@ ACTION_FIELDS = {
     'status': {'action'},
     'retry': {'action', 'release'},
     'switch': {'action', 'comment_id', 'release', 'eligible'},
+    'prepare-d4': {'action', 'lease', 'roles'},
     'd4-evidence': {'action', 'lease'},
     'd4-passed': {'action', 'lease', 'eligible', 'proofs'},
     'tick': {'action', 'eligible'},
@@ -98,6 +110,11 @@ def read_request(source):
         raise ValueError('invalid shared-test action fields')
     if 'lease' in request and (not isinstance(request['lease'], str) or not LEASE.fullmatch(request['lease'])):
         raise ValueError('invalid shared-test lease')
+    if action == 'prepare-d4':
+        roles = request['roles']
+        if (not isinstance(roles, dict) or not roles or not roles.keys() <= D4_SCENARIOS
+                or any(not isinstance(role, str) or role not in D4_ROLES for role in roles.values())):
+            raise ValueError('invalid D4 acceptance roles')
     return request
 
 
@@ -197,13 +214,88 @@ def d4_evidence(slot, now):
     return evidence
 
 
+def trusted_script(script):
+    for path in (script, *script.parents):
+        info = path.lstat()
+        kind = stat.S_ISREG if path == script else stat.S_ISDIR
+        if not kind(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise ValueError('invalid trusted D4 installation')
+
+
+def d4_blocked(reason):
+    return {'state': 'blocked', 'reason': reason}
+
+
+def d4_preparation_result(raw, roles, expected_url, now):
+    if len(raw) > 4096:
+        raise ValueError('invalid D4 response size')
+    result = json.loads(raw, object_pairs_hook=distinct_fields)
+    if isinstance(result, dict):
+        state = result.get('state')
+        if state == 'blocked' and result.keys() == {'state', 'reason'}:
+            if isinstance(result['reason'], str) and result['reason'] in D4_BLOCKERS:
+                return result
+        if state == 'ready' and result.keys() == {'state', 'url', 'expires_at', 'scenarios'}:
+            expires, scenarios = result['expires_at'], result['scenarios']
+            if (result['url'] == expected_url and type(expires) is int and now < expires <= now + 3600
+                    and isinstance(scenarios, list) and scenarios == sorted(roles)):
+                return result
+    raise ValueError('invalid D4 readiness response')
+
+
+def invoke_d4_preparer(lease, roles, expected_url):
+    try:
+        trusted_script(D4_PREPARE)
+    except (OSError, ValueError):
+        return d4_blocked('provider-unavailable')
+    try:
+        result = subprocess.run(
+            ['/usr/bin/python3', '-E', '-s', '-B', str(D4_PREPARE)],
+            cwd='/', env={}, input=json.dumps({'lease': lease, 'roles': roles}).encode(),
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=D4_PREPARE_TIMEOUT, check=False,
+        )
+        if result.returncode:
+            return d4_blocked('provider-failed')
+        return d4_preparation_result(result.stdout, roles, expected_url, int(time.time()))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return d4_blocked('provider-failed')
+
+
+def prepare_d4(request, load_preview, queue_type, locks):
+    lease, roles = request['lease'], request['roles']
+    with locks():
+        database = state_database()
+        queue = queue_type(database)
+        slot = current(queue, database)
+        if slot['phase'] != 'testing' or slot.get('lease') != lease:
+            raise ValueError('D4 preparation requires the current testing lease')
+        preview = load_preview()
+        helper = preview.helper
+        mac = helper.mac_shared_profile()
+        fixed_route = helper.ROUTES / 'shared-test.caddy'
+        owned_route(fixed_route, slot, request['action'], mac=mac)
+        if not exists(fixed_route):
+            raise ValueError('D4 preparation requires a published preview')
+        verify_rollout(preview, slot)
+        issued = preview.shared_account_roles(slot['pr'], slot['merge'], lease)
+        if any(role not in issued for role in roles.values()):
+            return d4_blocked('role-unavailable')
+
+    # The reviewed provider acquires the deployment lock itself and binds all
+    # resource mutations to the exact lease. Do not hold it while we wait.
+    result = invoke_d4_preparer(lease, roles, D4_MAC_URL if mac else D4_ORACLE_URL)
+    with locks():
+        if current(queue, state_database()) != slot:
+            raise ValueError('shared-test lease changed during D4 preparation')
+        owned_route(fixed_route, slot, request['action'], mac=mac)
+        if not exists(fixed_route):
+            raise ValueError('shared-test route changed during D4 preparation')
+    return result
+
+
 def cleanup_d4(lease):
     try:
-        for path in (D4_CLEANUP, *D4_CLEANUP.parents):
-            info = path.lstat()
-            kind = stat.S_ISREG if path == D4_CLEANUP else stat.S_ISDIR
-            if not kind(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
-                raise ValueError('untrusted D4 cleanup installation')
+        trusted_script(D4_CLEANUP)
         result = subprocess.run(
             ['/usr/bin/python3', '-E', '-s', '-B', str(D4_CLEANUP), '--lease', lease],
             cwd='/', env={}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -216,6 +308,7 @@ def cleanup_d4(lease):
 
 
 def run(request, preview, queue_type):
+    """Reconcile a queue operation with both host deployment locks held."""
     database = state_database()
     queue = queue_type(database)
     slot = current(queue, database)

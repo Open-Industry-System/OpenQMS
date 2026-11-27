@@ -39,7 +39,32 @@ python3 deploy/d4-acceptance/browser.py \
 
 发放服务应在租约进入 `releasing` 后停止专用 HTTPS 入口与代理、撤销账号和授权、清除合成任务及独占运行资源，确认实际回收后移除本轮发放目录。Oracle 的实际发放、撤权控制、浏览器两场景、自动清理与线上 CI 交接为 **NOT_RUN**。本地用 #45 实际应用和独占 PostgreSQL 验证了发放与撤权。实际授权读取返回 200，同一运行撤权后返回 401，交付计数保持 1，撤权审计增加一条。Docker 清理在本地临时资源验证，通过外部端点拒绝和独占对象回收。宿主 systemd 与 Oracle 未执行。
 
-## 审批后的发放与清理
+## 接入自动发放
+
+共享部署从当前验收计划读取场景和角色。受信控制器在已部署的共享测试位上调用 `prepare_preview.py`，按声明发放原生交付、撤权或两项。发放确认精确 PR 版本、独立数据库和任务后，启动本轮门户和执行器。门户的 `/healthz` 只回传就绪状态、PR、部署版本和轮次标识，不需要验收账号。通过公网 HTTPS 核对轮次后，PR 通知才展示入口。
+
+完成测试主机审批后，从受审版本运行 `bash deploy/d4-acceptance/install.sh`。在该主机准备以下资源：
+
+- 将独立审批的原生接收程序运行包放入 `/usr/local/lib/openqms/d4-acceptance/native`。运行包和清单遵循原生启动器的权限要求。该目录不从候选 PR 检出。
+- 在本机预先加载与 Linux 虚拟机架构匹配的已审原生 receiver 和撤权 receiver 镜像。核对 PostgreSQL 镜像 ID 与共享预览实际使用的镜像一致。
+- 将专用 HTTPS 域名经受信网关指向虚拟机回环 `8444`。Mac 共享测试用 `https://d4-test-openqms.smartindustry.world`，Oracle 共享测试用 `https://d4.preview.openqms.smartindustry.world`。网关需验证本机门户证书，并让受信部署检查能直接访问 `/healthz`。门户仍校验本轮私下发放的账号。
+- 放置门户证书和私钥。路径是 `/etc/openqms/d4-acceptance/tls-cert.pem` 和 `/etc/openqms/d4-acceptance/tls-key.pem`。私钥由 root 管理，systemd 通过服务凭据加载。
+- 写入 root 所有、权限 `0600` 的 `/etc/openqms/d4-acceptance/preview-provider.json`。
+
+配置字段如下：
+
+| 字段 | 值 |
+| --- | --- |
+| `origin` | 当前共享主机对应的专用 HTTPS 地址，末尾不加斜杠 |
+| `native_manifest_sha256` | 受审原生运行包清单摘要，64 位小写十六进制 |
+| `worker_sha256` | 原生接收程序工作文件摘要，64 位小写十六进制 |
+| `delivery_image` | 受审原生 receiver 的本机镜像 ID |
+| `revoke_image` | 受审撤权 receiver 的本机镜像 ID |
+| `postgres_image` | 本机 PostgreSQL 镜像 ID，与共享测试数据库镜像一致 |
+
+镜像 ID 使用 `sha256:<64 位小写十六进制>`。发放只加载当前计划所需的原生运行包或接收镜像。已经完成发放时，重复调度复用本轮资源和经核对的 HTTPS 入口。专用窗口到期后，若仍是同一共享测试版本和轮次，下一次调度回收旧的专用资源并发放新的报告、任务和验收窗口。旧窗口的回执随专用资源回收。队列退役时回收门户、执行器、容器、数据和私有配置。
+
+## 审批后的手动发放与清理
 
 1. 在 Oracle 审批完成后，从受审版本运行 `bash deploy/d4-acceptance/install.sh`。它安装专用服务和受信脚本。受信 HTTPS 网关指向宿主回环 8444，并为专用域名使用 `/etc/openqms/d4-acceptance/tls-cert.pem` 与 `tls-key.pem`。私钥由 root 管理，systemd 通过服务凭据交给浏览器进程。
 2. 在活跃的共享测试租约中准备两个同构隔离 case。使用同一受审候选 backend 镜像，两个独立 API、数据库和私密目录。创建 root 独占的租约目录，再按下述命名和标签准备 Docker 对象。取得容器与数据库标识后，在准备 native root 之前登记 `/var/lib/openqms-shared-test/d4/<lease>/prepared.json`（0600）。文件有 `binding` 和 `cases` 两个字段，`binding` 使用当前版本和同一个新合成报告 UUID。每个 case 配置 `api_container_id`、`db_container_id`、`db_image_id`、`db_system_identifier`、`db_host` 和 `api_port`。正常交付另填 `root`、`manifest_sha256`、`nonce`。撤权另填 `revoke_image_id`。参照 [合成任务发放](ISSUANCE.md)。

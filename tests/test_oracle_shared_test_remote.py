@@ -1,4 +1,5 @@
 import importlib.util
+from contextlib import nullcontext
 import io
 import json
 from pathlib import Path
@@ -335,3 +336,131 @@ def test_release_waits_for_only_the_current_d4_allocation(host, monkeypatch, tmp
     assert called == [lease]
     assert unrelated.is_dir()
     assert run(host, 'tick', eligible=eligible)['pr'] == 46
+
+
+@pytest.mark.parametrize('roles', [
+    {}, {'other': 'manager'}, {'d4-deliver': 'admin'}, {'d4-deliver': ['manager']},
+    ['d4-deliver'], 'd4-deliver',
+])
+def test_prepare_d4_rejects_invalid_role_assignments(roles):
+    raw = json.dumps({'action': 'prepare-d4', 'lease': 'a' * 32, 'roles': roles}).encode()
+    with pytest.raises(ValueError, match='invalid D4 acceptance roles'):
+        remote.read_request(io.BytesIO(raw))
+
+
+def test_prepare_d4_rejects_a_caller_supplied_command_or_url():
+    payload = {'action': 'prepare-d4', 'lease': 'a' * 32, 'roles': {'d4-revoke': 'manager'}}
+    for field in ('url', 'command'):
+        with pytest.raises(ValueError, match='invalid shared-test action fields'):
+            remote.read_request(io.BytesIO(json.dumps({**payload, field: '/tmp/other'}).encode()))
+
+
+@pytest.mark.parametrize('mac, url', [(True, remote.D4_MAC_URL), (False, remote.D4_ORACLE_URL)])
+def test_receiver_prepares_d4_outside_queue_locks(host, mac, url, monkeypatch, tmp_path, capsys):
+    host[0].helper.mac_shared_profile.return_value = mac
+    eligible = [identity(45)]
+    slot = run(host, 'tick', eligible=eligible)
+    stage_runtime(host, slot)
+    ready = run(host, 'ready', lease=slot['lease'], eligible=eligible)
+    roles = {'d4-revoke': 'manager', 'd4-deliver': 'field_qe'}
+    expected = dict(state='ready', url=url, expires_at=150, scenarios=sorted(roles))
+    raw = json.dumps({'action': 'prepare-d4', 'lease': ready['lease'], 'roles': roles}).encode()
+    monkeypatch.setattr(receiver.sys, 'argv', ['receiver', 'preview', 'preview queue'])
+    monkeypatch.setattr(receiver.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(raw)))
+    monkeypatch.setattr(receiver, 'LOCK', tmp_path / 'deployment.lock')
+    monkeypatch.setattr(receiver, 'OPERATION', tmp_path / 'operation.lock')
+    monkeypatch.setattr(receiver, 'installed', lambda kind: host[0])
+    monkeypatch.setattr(receiver, 'shared_modules', lambda: (remote, Queue))
+    monkeypatch.setattr(remote, 'enabled', lambda: True)
+    monkeypatch.setattr(receiver.os, 'umask', Mock())
+
+    def provider(lease, assignments, origin):
+        # The provider must be able to acquire its own locks while running.
+        with receiver.shared_locks():
+            assert (lease, assignments, origin) == (ready['lease'], roles, url)
+        return expected
+
+    monkeypatch.setattr(remote, 'invoke_d4_preparer', provider)
+    receiver.main()
+    assert json.loads(capsys.readouterr().out) == expected
+    assert run(host, 'status')['phase'] == 'testing'
+
+
+def test_prepare_d4_checks_live_lease_and_authorized_roles(host, monkeypatch):
+    eligible = [identity(45)]
+    slot = run(host, 'tick', eligible=eligible)
+    stage_runtime(host, slot)
+    roles = {'d4-revoke': 'manager'}
+    payload = {'action': 'prepare-d4', 'lease': slot['lease'], 'roles': roles}
+    invoke = Mock()
+    monkeypatch.setattr(remote, 'invoke_d4_preparer', invoke)
+
+    with pytest.raises(ValueError, match='current testing lease'):
+        remote.prepare_d4(payload, lambda: host[0], Queue, nullcontext)
+    run(host, 'ready', lease=slot['lease'], eligible=eligible)
+    with pytest.raises(ValueError, match='current testing lease'):
+        remote.prepare_d4(dict(payload, lease='0' * 32), lambda: host[0], Queue, nullcontext)
+    host[0].shared_account_roles.return_value = ['field_qe']
+    assert remote.prepare_d4(payload, lambda: host[0], Queue, nullcontext) == {
+        'state': 'blocked', 'reason': 'role-unavailable',
+    }
+    invoke.assert_not_called()
+
+
+def test_prepare_d4_rejects_result_if_lease_changes(host, monkeypatch):
+    eligible = [identity(45)]
+    slot = run(host, 'tick', eligible=eligible)
+    stage_runtime(host, slot)
+    run(host, 'ready', lease=slot['lease'], eligible=eligible)
+
+    def provider(lease, assignments, origin):
+        run(host, 'passed', lease=lease, eligible=eligible)
+        return dict(state='ready', url=origin, expires_at=150, scenarios=sorted(assignments))
+
+    monkeypatch.setattr(remote, 'invoke_d4_preparer', provider)
+    payload = {'action': 'prepare-d4', 'lease': slot['lease'], 'roles': {'d4-revoke': 'manager'}}
+    with pytest.raises(ValueError, match='lease changed'):
+        remote.prepare_d4(payload, lambda: host[0], Queue, nullcontext)
+
+
+def test_unavailable_d4_provider_is_reported_without_invoking_it(host, monkeypatch):
+    def missing(script):
+        raise FileNotFoundError(script)
+
+    monkeypatch.setattr(remote, 'trusted_script', missing)
+    invoke = Mock()
+    monkeypatch.setattr(remote.subprocess, 'run', invoke)
+    result = remote.invoke_d4_preparer('a' * 32, {'d4-deliver': 'manager'}, remote.D4_MAC_URL)
+    assert result == {'state': 'blocked', 'reason': 'provider-unavailable'}
+    invoke.assert_not_called()
+
+
+@pytest.mark.parametrize('fields', [
+    {'expires_at': 100}, {'expires_at': 3701}, {'expires_at': True},
+    {'url': remote.D4_ORACLE_URL}, {'url': 'https://untrusted.invalid/'},
+    {'scenarios': ['d4-deliver', 'd4-revoke']}, {'scenarios': ['d4-deliver', 'd4-deliver']},
+    {'secret': 'non-public-value'},
+])
+def test_prepare_d4_rejects_untrusted_or_stale_readiness_response(fields):
+    roles = {'d4-deliver': 'field_qe'}
+    ready = {'state': 'ready', 'url': remote.D4_MAC_URL, 'expires_at': 150, 'scenarios': sorted(roles)}
+    raw = json.dumps({**ready, **fields}).encode()
+    with pytest.raises(ValueError, match='invalid D4 readiness response'):
+        remote.d4_preparation_result(raw, roles, remote.D4_MAC_URL, 100)
+
+
+def test_d4_preparer_validates_and_keeps_blocker_details_private(host, monkeypatch):
+    monkeypatch.setattr(remote, 'trusted_script', Mock())
+    reason = {'state': 'blocked', 'reason': 'runtime-unavailable'}
+    invoke = Mock(return_value=SimpleNamespace(stdout=json.dumps(reason).encode(), returncode=0))
+    monkeypatch.setattr(remote.subprocess, 'run', invoke)
+    lease, roles = 'a' * 32, {'d4-deliver': 'manager'}
+    assert remote.invoke_d4_preparer(lease, roles, remote.D4_MAC_URL) == reason
+    args, options = invoke.call_args
+    assert args == (['/usr/bin/python3', '-E', '-s', '-B', str(remote.D4_PREPARE)],)
+    assert json.loads(options['input']) == {'lease': lease, 'roles': roles}
+    assert options['env'] == {} and options['stderr'] == remote.subprocess.DEVNULL
+    invoke.return_value.stdout = b'{"state":"blocked","reason":"untrusted-value"}'
+    assert remote.invoke_d4_preparer(lease, roles, remote.D4_MAC_URL) == {
+        'state': 'blocked', 'reason': 'provider-failed',
+    }

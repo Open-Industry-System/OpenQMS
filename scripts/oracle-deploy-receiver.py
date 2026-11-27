@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Root-installed receiver for a dedicated forced-command production SSH key."""
+from contextlib import contextmanager
 import fcntl
 import json
 import hashlib
@@ -179,16 +180,25 @@ def shared_mode():
     return SHARED_MODE.exists() or SHARED_MODE.is_symlink()
 
 
+@contextmanager
+def shared_locks():
+    with open(LOCK, 'a') as lock, open(OPERATION, 'a') as operation:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(operation, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+
+
 def shared_request():
     remote, queue_type = shared_modules()
     if not remote.enabled():
         raise ValueError('shared-test mode unavailable')
     request = remote.read_request(sys.stdin.buffer)
     os.umask(0o077)
-    with open(LOCK, 'a') as lock, open(OPERATION, 'a') as operation:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(operation, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        result = remote.run(request, installed('preview'), queue_type)
+    if request['action'] == 'prepare-d4':
+        result = remote.prepare_d4(request, lambda: installed('preview'), queue_type, shared_locks)
+    else:
+        with shared_locks():
+            result = remote.run(request, installed('preview'), queue_type)
     print(json.dumps(result), flush=True)
 
 

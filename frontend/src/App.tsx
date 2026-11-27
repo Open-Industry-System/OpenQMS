@@ -190,7 +190,7 @@ export default function App() {
           }
         >
           <Route index element={<SupplierRiskPage />} />
-          <Route path="config" element={<RiskConfigPage />} />
+          <Route path="/supplier-risk/config" element={<RiskConfigPage />} />
         </Route>
         <Route path="/supply-chain-risk-map" element={<ProtectedRoute requiredModule="supply_chain_risk_map"><SupplyChainRiskMapPage /></ProtectedRoute>} />
         <Route path="/msa" element={<ProtectedRoute requiredModule="msa"><Navigate to="/msa/gauges" replace /></ProtectedRoute>} />
