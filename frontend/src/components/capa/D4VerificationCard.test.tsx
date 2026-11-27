@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
-import { render, screen, fireEvent, waitFor, configure } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, configure, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 configure({ testIdAttribute: "data-e2e" });
 afterAll(() => configure({ testIdAttribute: "data-testid" }));
@@ -133,4 +133,28 @@ describe("D4VerificationCard", () => {
       expect(screen.getByText("Reproduction")).toBeInTheDocument();
     });
   });
+});
+
+it('retains readonly known source restrictions when current reference is cleared',async()=>{
+ (listVerifications as any).mockResolvedValue([{verification_id:'v1',capa_id:'c1',root_cause_text:'rc',method:null,result:null,conclusion:'pending',is_verified:false,evidence_attachments:[],source_ref:null,known_source_origins:[{kind:'fmea',fmea_id:'historical-fmea',cause_node_id:'historical-cause',factory_id:'factory',product_line_code:'line'}],verified_by:null,verified_at:null,created_at:'2026-11-16'}]);
+ renderCard({currentRootCause:null,fmeaRefId:null,canEdit:false});
+ expect(await screen.findByText(/historical-fmea/)).toBeInTheDocument();
+ expect(screen.getByText(/清空或替换当前引用不解除已知来源限制/)).toBeInTheDocument();
+});
+
+it('clears retained verification evidence after a later read revokes source access',async()=>{
+ (listVerifications as any).mockResolvedValue([{verification_id:'v1',capa_id:'c1',root_cause_text:'protected-verification',method:null,result:null,conclusion:'pending',is_verified:false,evidence_attachments:[],source_ref:null,known_source_origins:[],verified_by:null,verified_at:null,created_at:'2026-11-16'}]);
+ renderCard({canEdit:false});await screen.findByText('protected-verification');
+ (listVerifications as any).mockRejectedValue({response:{status:403}});
+ await waitFor(()=>expect(screen.queryByText('protected-verification')).toBeNull(),{timeout:3000});
+});
+
+it('does not restore an older authorized verification body after a newer poll returns 403',async()=>{
+ let resolve!:(v:any)=>void;
+ (listVerifications as any).mockReturnValueOnce(new Promise(r=>resolve=r)).mockRejectedValue({response:{status:403}});
+ renderCard({canEdit:false});
+ await waitFor(()=>expect(listVerifications).toHaveBeenCalledTimes(2),{timeout:3000});
+ await act(async()=>resolve([{verification_id:'old-v',capa_id:'c1',root_cause_text:'revoked-old-root',method:null,result:null,conclusion:'pending',is_verified:false,evidence_attachments:[],source_ref:null,known_source_origins:[{kind:'fmea',fmea_id:'revoked-fmea',cause_node_id:'revoked-cause',factory_id:'factory',product_line_code:'line'}],verified_by:null,verified_at:null,created_at:'2026-11-16'}]));
+ expect(screen.queryByText('revoked-old-root')).toBeNull();
+ expect(screen.queryByText(/revoked-fmea/)).toBeNull();
 });

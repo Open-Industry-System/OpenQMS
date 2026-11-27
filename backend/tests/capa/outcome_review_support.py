@@ -221,6 +221,14 @@ async def review_case(sessionmaker, monkeypatch):
         yield case
     finally:
         async with sessionmaker() as db:
+            # Fixture-owned immutable R6 history is removed only at teardown.
+            # LOCAL resets when this cleanup transaction ends.
+            from app.models.capa_r6 import (CapaR6RootRevisionSource, CapaR6RootRevisionBody,
+                CapaR6SourceOrigin, CapaR6ReportSnapshot, CapaR6MaterialVersion,CapaR6LegacyCapture)
+            await db.execute(text("SET LOCAL session_replication_role = replica"))
+            for model in (CapaR6RootRevisionSource, CapaR6RootRevisionBody,
+                          CapaR6SourceOrigin, CapaR6ReportSnapshot, CapaR6MaterialVersion,CapaR6LegacyCapture):
+                await db.execute(delete(model).where(model.report_id == report_id))
             from app.models.knowledge_entry import KnowledgeEntry
             from app.models.capa_lateral_diffusion import CapaLateralDiffusionCheck
             await db.execute(delete(CapaLateralDiffusionCheck).where(CapaLateralDiffusionCheck.capa_id == report_id))

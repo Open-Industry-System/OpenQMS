@@ -480,7 +480,11 @@
     "d7": "D7 action records",
     "gate": {
       "title": "Document gate decision",
-      "decision": { "passed": "Passed", "blocked": "Blocked", "deferred": "Deferred" },
+      "decision": {
+        "passed": "Passed",
+        "blocked": "Blocked",
+        "deferred": "Deferred"
+      },
       "decisionId": "Gate decision ID",
       "revision": "Gate revision",
       "decidedBy": "Decided by",
@@ -540,6 +544,73 @@
       "pending": "Pending verification",
       "passed": "Verification passed",
       "failed": "Verification failed"
+    }
+  },
+  "r6": {
+    "candidateTitle": "D4 root cause candidates · Employee confirmation",
+    "sourceTitle": "Controlled source details",
+    "measureTitle": "Formal D5 corrections and history",
+    "localTitle": "Local closure · Manual document gate",
+    "localPpt": "Export local rules PPT (model not run)",
+    "localPptDone": "Local rules PPT exported; model review was not run.",
+    "localReviewTitle": "Local closure and propagation for this review",
+    "localReviewNote": "Manual analysis is recorded separately; propagation channels were explicitly not executed in this review."
+  },
+  "pfmeaImpact": {
+    "title": "Assess PFMEA impact",
+    "loading": "Loading",
+    "target": "Target PFMEA",
+    "chooseTarget": "Choose a target PFMEA",
+    "noTargets": "No approved versions are available for assessment.",
+    "approvedBaseline": "Approved baseline: {{version}}",
+    "unapprovedRevision": "An unapproved revision exists. This assessment uses the selected approved version.",
+    "start": "Start assessment",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "unavailable": "Assessment unavailable.",
+    "retry": "Could not complete the action. Please try again.",
+    "versionChanged": "Assessment inputs changed. Please confirm the selection again.",
+    "reload": "Reload",
+    "recommendation": "PFMEA impact recommendation",
+    "stale": "Recommendation is out of date",
+    "versions": "Report version: {{reportVersion}} · Approved baseline: {{approvedVersion}}",
+    "adoption": "Original formal adoption",
+    "revision": "Formal revision: {{version}}",
+    "facts": "Verified facts",
+    "inference": "Inference: {{value}}",
+    "reason": "Reason: {{value}}",
+    "adjustments": "Adjustments to review",
+    "gaps": "Information still needed",
+    "evidence": "Evidence",
+    "model": "Approved model deployment",
+    "chooseModel": "Choose a deployment",
+    "noOptions": "No deployment is approved for this selection.",
+    "launch": "Run assessment",
+    "cancel": "Cancel assessment",
+    "history": "Assessment history",
+    "chooseResult": "Choose a recommendation",
+    "reassess": "Reassess",
+    "readiness": {
+      "d4_not_verified": "Confirm the D4 root cause and its verification first.",
+      "d5_not_adopted": "Formally adopt at least one D5 measure first.",
+      "sources_unavailable": "The formal sources required for this assessment are incomplete.",
+      "too_large": "The formal material exceeds this assessment's limits."
+    },
+    "kind": {"local": "Local", "cloud": "Cloud"},
+    "conclusion": {
+      "impact_found": "Impact found",
+      "no_impact_found": "No impact found",
+      "insufficient_evidence": "Insufficient evidence"
+    },
+    "status": {
+      "blocked_capability": "Waiting for run authorization",
+      "ready": "Waiting to run",
+      "queued": "Waiting to run",
+      "running": "Assessment in progress",
+      "paused": "Assessment paused",
+      "completed": "Assessment completed",
+      "failed": "Assessment failed",
+      "cancelled": "Assessment cancelled"
     }
   }
 }

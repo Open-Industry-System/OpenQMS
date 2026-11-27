@@ -16,6 +16,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa: F401
 from sqlalchemy import text
 
 from app.models.capa import CAPAEightD

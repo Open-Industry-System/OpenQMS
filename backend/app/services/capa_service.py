@@ -28,6 +28,7 @@ async def list_capas(
     pending_action: bool = False,
     allowed_product_line_codes: list[str] | None = None,
     factory_id: uuid.UUID | None = None,
+    actor_id=None,
 ) -> tuple[list[CAPAEightD], int]:
     from datetime import datetime
     now = datetime.now(UTC)
@@ -72,8 +73,21 @@ async def list_capas(
     query = query.order_by(CAPAEightD.created_at.desc())
     query = query.offset((page - 1) * page_size).limit(page_size)
 
+    if actor_id is not None:
+        from app.services.capa_d4_material import authorize_root
+        identifiers = list((await db.scalars(query.with_only_columns(CAPAEightD.report_id))).all())
+        for identifier in identifiers:
+            await authorize_root(db, actor_id, identifier)
+            from app.services.capa_legacy_capture import authorize_bound_sources
+            await authorize_bound_sources(db,actor_id,identifier,d_step="d5")
+        # The original page can move during source authorization. Materialize
+        # only the identifiers that were admitted, in that frozen order.
+        query = query.where(CAPAEightD.report_id.in_(identifiers)).offset(None).limit(None)
     result = await db.execute(query)
     items = list(result.scalars().all())
+    if actor_id is not None:
+        by_id = {item.report_id: item for item in items}
+        items = [by_id[identifier] for identifier in identifiers if identifier in by_id]
 
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -81,8 +95,9 @@ async def list_capas(
     return items, total
 
 
-async def get_capa(db: AsyncSession, report_id: uuid.UUID) -> CAPAEightD | None:
-    result = await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == report_id))
+async def get_capa(db: AsyncSession, report_id: uuid.UUID, *, fresh: bool = False) -> CAPAEightD | None:
+    result = await db.execute(select(CAPAEightD).where(CAPAEightD.report_id == report_id)
+        .execution_options(populate_existing=fresh))
     return result.scalar_one_or_none()
 
 
@@ -235,11 +250,34 @@ async def update_capa(
     update_data: dict,
     user_id: uuid.UUID,
 ) -> CAPAEightD:
-    # Lock and refresh before every validation or side effect.  The reviewed
-    # material guard also preserves the existing concurrent-link invariant.
-    capa = await lock_current_material_write(
-        db, capa, user_id, PermissionLevel.EDIT, set(update_data)
-    )
+    from app.services.capa_entry_switch import admit, require_manual_version
+    switch = await admit(db, 'manual' if {'d4_root_cause', 'd5_correction'} & set(update_data) else 'safe')
+    # Current authority and the report lock precede echo normalization. A
+    # projected local D7 echo is no core write, including in terminal reports
+    # where the existing contract still permits noncore maintenance.
+    from app.services.capa_review_guard import lock_capa_parent,assert_reviewed_material_mutable
+    capa=await lock_capa_parent(db,capa.report_id,actor_id=user_id,required_level=PermissionLevel.EDIT)
+    from app.services.capa_d4_material import material_version
+    update_data=dict(update_data)
+    if {'d4_root_cause', 'd5_correction'} & set(update_data):
+        require_manual_version(switch, update_data, await material_version(db, capa.report_id))
+    update_data.pop('expected_entry_epoch', None)
+    expected=update_data.pop('expected_material_version',None)
+    restricted_d7_change=False
+    if 'd7_prevention' in update_data:
+        from app.services.capa_r6_local_closure import prevention_text,eligible
+        local_text=await prevention_text(db,user_id,capa.report_id)
+        projected=local_text if local_text is not None else capa.d7_prevention
+        if update_data['d7_prevention']==projected:
+            update_data.pop('d7_prevention')
+        else:
+            restricted_d7_change=await eligible(db,capa.report_id)
+    # Preserve every existing terminal/core rule for actual remaining inputs.
+    assert_reviewed_material_mutable(capa,set(update_data))
+    if restricted_d7_change:
+        raise ValueError('本地预防请通过受控本地预防入口更正')
+    if expected is not None and expected != await material_version(db, capa.report_id):
+        raise ValueError("CAPA_MATERIAL_CHANGED")
     if "product_line_code" in update_data and update_data["product_line_code"] is not None:
         await current_capa_actor_product_line(
             db, user_id, capa.factory_id, update_data["product_line_code"], PermissionLevel.EDIT
@@ -368,7 +406,8 @@ async def update_capa(
             table_name="capa_eightd",
             record_id=capa.report_id,
             action="UPDATE",
-            changed_fields=changed_fields,
+            changed_fields={key: ({"changed": True} if key in {"d4_root_cause", "d5_correction"} else value)
+                            for key, value in changed_fields.items()},
             operated_by=user_id,
             factory_id=capa.factory_id,
         )
@@ -388,10 +427,20 @@ async def update_capa(
 
     if embedding_changed:
         await enqueue_embedding(db, "capa", capa.report_id, capa.product_line_code, capa.factory_id)
+    from app.services.capa_d4_material import snapshot_report_input
+    for field, kind in (("d2_description", "d2"), ("d3_interim", "d3")):
+        if field in changed_fields:
+            await snapshot_report_input(db, capa, kind)
     if "d4_root_cause" in changed_fields:
         from app.services.capa_d4_provenance import record_root_revision
         await record_root_revision(db, report_id=capa.report_id, actor_id=user_id, write_path="capa.update")
+    elif changed_fields and not {"d2_description", "d3_interim"}.intersection(changed_fields):
+        from app.services.capa_d4_material import bump_material
+        await bump_material(db, capa.report_id)
+    from app.services.capa_d4_material import authorize_root
+    await authorize_root(db, user_id, capa.report_id, PermissionLevel.EDIT)
     await db.commit()
+    await authorize_root(db, user_id, capa.report_id)
     await db.refresh(capa)
     return capa
 
@@ -433,7 +482,13 @@ async def _detect_repeat_capa(db: AsyncSession, capa) -> tuple[bool | None, str,
     return False, "not_matched", []
 
 
-async def _d7_completion_gate(db: AsyncSession, capa) -> None:
+async def _d7_completion_gate(db: AsyncSession, capa, *, actor_id=None) -> None:
+    from app.services.capa_r6_local_closure import eligible, require_current
+    if await eligible(db,capa.report_id):
+        if actor_id is None:raise PermissionError('Current actor required')
+        await require_current(db,capa,'prevention',actor_id)
+        await require_current(db,capa,'propagation',actor_id)
+        return
     from app.models.capa import CapaD7NodeAction
     from app.models.fmea import FMEADocument
     from app.services.capa_d7_action_service import recommendation_fingerprint
@@ -508,7 +563,7 @@ async def _d7_completion_gate(db: AsyncSession, capa) -> None:
 
 
 async def _d8_doc_gate_gate(
-    db: AsyncSession, capa: CAPAEightD, *, additional_parents=(),
+    db: AsyncSession, capa: CAPAEightD, *, additional_parents=(), actor_id=None,
 ) -> None:
     """D8_GATE_PENDING→D8_APPROVAL_PENDING: require latest decision=passed + C8/C9 freshness.
 
@@ -544,6 +599,9 @@ async def _d8_doc_gate_gate(
     )
     if analysis is None:
         raise ValueError("影响分析已失效，请重新生成影响分析")
+    from app.services.capa_r6_local_closure import eligible
+    if await eligible(db,capa.report_id) and analysis.analysis_method != "manual":
+        raise ValueError("受限报告请先完成人工文档影响分析")
 
     # Lock the candidate-set predicate before any document parent. Candidate
     # writers acquire this same ProductLine row before their document row.
@@ -554,9 +612,9 @@ async def _d8_doc_gate_gate(
     # Preserve the gate's C9-first contract even when no audit decision exists.
     # This is repeated after every version-parent lock is acquired below because
     # only the later check participates in the concurrency guarantee.
-    candidates = await _build_allowlist(db, capa)
-    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
-        raise ValueError("分析输入已变更，请重新生成影响分析")
+    from app.services.capa_r6_local_closure import require_analysis_fresh
+    if analysis.analysis_method=='manual' and actor_id is None:raise PermissionError('Current actor required')
+    await require_analysis_fresh(db,capa,analysis,actor_id)
 
     candidate_decision = await db.scalar(
         select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == analysis.analysis_id)
@@ -600,9 +658,9 @@ async def _d8_doc_gate_gate(
     )
     if current_analysis_id != analysis.analysis_id:
         raise ValueError("影响分析已失效，请重新生成影响分析")
-    candidates = await _build_allowlist(db, capa)
-    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
-        raise ValueError("分析输入已变更，请重新生成影响分析")
+    from app.services.capa_r6_local_closure import require_analysis_fresh
+    if analysis.analysis_method=='manual' and actor_id is None:raise PermissionError('Current actor required')
+    await require_analysis_fresh(db,capa,analysis,actor_id)
     decision = await db.scalar(
         select(CapaDocgDecision)
         .where(CapaDocgDecision.analysis_id == analysis.analysis_id)
@@ -657,7 +715,7 @@ async def advance_capa(
     from app.services.capa_review_guard import lock_capa_parent
     report_id = capa.report_id
     await current_capa_actor_target(db, user_id, report_id, PermissionLevel.EDIT)
-    capa = await lock_capa_parent(db, report_id)
+    capa = await lock_capa_parent(db, report_id, actor_id=user_id)
 
     current = EightDState(capa.status)
     target = req.target_state
@@ -701,8 +759,15 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
             raise OutcomeReviewConflict()
 
     # per-edge 闸口分发
-    if current == EightDState.D7_PREVENTION and target == EightDState.D7_COMPLETED:
-        await _d7_completion_gate(db, capa)
+    from app.services.capa_r6_local_closure import eligible, require_current
+    restricted = await eligible(db,report_id)
+    if restricted:
+        from app.services.capa_r6_local_closure import lock_transition_sources
+        await lock_transition_sources(db,capa,user_id)
+    if current == EightDState.D7_PREVENTION and target == EightDState.D7_COMPLETED and restricted:
+        await _d7_completion_gate(db,capa,actor_id=user_id)
+    elif current == EightDState.D7_PREVENTION and target == EightDState.D7_COMPLETED:
+        await _d7_completion_gate(db, capa,actor_id=user_id)
         # savepoint 内抽 d7 lessons（fail-closed）
         from app.services.capa_lessons_service import _extract_lessons
         try:
@@ -725,7 +790,13 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         from types import SimpleNamespace
         from app.services.capa_d5_measures import full_d5_material
         capa._d5_material = await full_d5_material(db, capa, scope=SimpleNamespace(user=SimpleNamespace(user_id=user_id)))
-        await _d8_doc_gate_gate(db, capa)
+        await _d8_doc_gate_gate(db, capa,actor_id=user_id)
+        if restricted: await require_current(db,capa,'propagation',user_id)
+    elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE and restricted:
+        row=await require_current(db,capa,'propagation',user_id)
+        db.add(AuditLog(table_name='capa_eightd',record_id=report_id,action='R6_PROPAGATION_NOT_EXECUTED',
+            operated_by=user_id,factory_id=capa.factory_id,changed_fields=dict(revision_id=str(row.revision_id),
+            channels=['lessons','knowledge','lateral','supplier_risk'],status='NOT_EXECUTED')))
     elif current == EightDState.D8_APPROVAL_PENDING and target == EightDState.D8_CLOSURE:
         # Closure side effects remain in the same locked decision transaction.
         from app.services.knowledge_sink_service import sink_capa_on_close
@@ -745,6 +816,8 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         current_rc = (capa.d4_root_cause or "").strip()
         if not current_rc:
             raise ValueError("D4→D5 需先填写根因并验证")
+        from app.services.capa_verification_sources import authorize_verifications
+        await authorize_verifications(db,capa.report_id,actor_id=user_id,lock=True)
         cnt = await db.scalar(select(func.count()).select_from(CapaRootCauseVerification).where(
             CapaRootCauseVerification.capa_id == capa.report_id,
             CapaRootCauseVerification.factory_id == capa.factory_id,
@@ -830,6 +903,7 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         old_status == EightDState.D7_PREVENTION.value
         and capa.status == EightDState.D7_COMPLETED.value
         and capa.supplier_id is not None
+        and not restricted
     ):
         from app.models.supplier_risk_capa_input import SupplierRiskCapaInput
 
@@ -879,8 +953,21 @@ async def _apply_capa_transition(db, capa, user_id, req, current, target, receip
         # the core HMAC. Retained locks still fence every material/source writer.
         await db.flush()
         await revalidate_decision()
+    from app.services.capa_d4_material import authorize_root, bump_material
+    required = PermissionLevel.APPROVE if current in {
+        EightDState.D8_APPROVAL_PENDING, EightDState.D8_CLOSURE} else PermissionLevel.EDIT
+    await authorize_root(db, user_id, report_id, required)
+    uses_verification=current==EightDState.D4_ROOT_CAUSE and target==EightDState.D5_CORRECTION
+    if uses_verification:
+        await authorize_verifications(db,report_id,actor_id=user_id)
+    await bump_material(db, report_id)
     await db.commit()  # existing commit includes outbox
+    await authorize_root(db, user_id, report_id)
+    if uses_verification:
+        await authorize_verifications(db,report_id,actor_id=user_id)
     await db.refresh(capa)
+    if uses_verification:
+        await authorize_verifications(db,report_id,actor_id=user_id)
     return capa
 
 
@@ -938,7 +1025,12 @@ async def link_fmea(
             },
             operated_by=user_id, factory_id=capa.factory_id,
         ))
+    from app.services.capa_d4_material import authorize_root, bump_material
+    await authorize_root(db, user_id, capa.report_id, PermissionLevel.EDIT)
+    if ref_changed or node_changed:
+        await bump_material(db, capa.report_id)
     await db.commit()
+    await authorize_root(db, user_id, capa.report_id)
     await db.refresh(capa)
     return capa
 
@@ -1292,7 +1384,7 @@ async def get_capas_by_fmea_node(
             _add(a.capa_id, *hits)
 
     # 3. D4 source_ref
-    vq = select(CapaRootCauseVerification, CAPAEightD).join(
+    vq = select(CapaRootCauseVerification.capa_id).join(
         CAPAEightD, CAPAEightD.report_id == CapaRootCauseVerification.capa_id
     ).where(CapaRootCauseVerification.source_ref["fmea_id"].astext == fmea_id)
     fpv = _factory_predicate(CAPAEightD)
@@ -1300,8 +1392,8 @@ async def get_capas_by_fmea_node(
         vq = vq.where(fpv)
     if fmea_node_id:
         vq = vq.where(CapaRootCauseVerification.source_ref["cause_node_id"].astext == fmea_node_id)
-    for v, c in (await db.execute(vq)).all():
-        _add(c.report_id, "d4_cause")
+    for capa_id in (await db.execute(vq)).scalars().all():
+        _add(capa_id, "d4_cause")
 
     if not sources_by_capa:
         return []

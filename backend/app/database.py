@@ -9,7 +9,7 @@ from app.config import settings
 from app.core.tenant_transaction import TenantBinding, TenantUnavailable, bind_business_transaction
 from app.core.tenant_utils import current_tenant_binding, current_tenant_schema
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
+engine = create_async_engine(settings.DATABASE_URL, echo=False, hide_parameters=True)
 # This public factory is for platform control-plane queries and single-tenant mode.
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -89,6 +89,8 @@ async def get_db(request: Request):
                 request.app.state, "agent_d4_text_policy", EMPTY_TEXT_POLICY,
             )
             session.info["r5_controlled_pilot"] = getattr(request.app.state, "r5_controlled_pilot", None)
+            session.info["r7_impact_pilot"] = getattr(request.app.state, "r7_impact_pilot", None)
+            session.info["iqc_investigation_pilot"] = getattr(request.app.state, "iqc_investigation_pilot", None)
             session.info["r5_credential_resolver"] = getattr(request.app.state, "r5_credential_resolver", None)
             try:
                 yield session

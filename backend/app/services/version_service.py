@@ -147,18 +147,26 @@ async def _create_fmea_version_no_commit(
     )
     db.add(version)
 
-    # Audit log
+    # Bind the approval to the factory and product line at publication time.
+    # Older versions without this evidence must not inherit a moved document's scope.
+    changed_fields = {
+        "fmea_id": str(fmea.fmea_id),
+        "version": f"v{major_no}.{minor_no}",
+        "change_type": change_type,
+        "change_summary": change_summary or "",
+    }
+    if change_type == "approve":
+        changed_fields["approval_scope_v1"] = {
+            "product_line_code": fmea.product_line_code,
+            "snapshot_hash": sha256_hash,
+        }
     db.add(AuditLog(
         table_name="fmea_versions",
         record_id=version.version_id,
         action="CREATE",
-        changed_fields={
-            "fmea_id": str(fmea.fmea_id),
-            "version": f"v{major_no}.{minor_no}",
-            "change_type": change_type,
-            "change_summary": change_summary or "",
-        },
+        changed_fields=changed_fields,
         operated_by=user_id,
+        factory_id=fmea.factory_id if change_type == "approve" else None,
     ))
 
     await db.flush()

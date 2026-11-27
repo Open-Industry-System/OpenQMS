@@ -84,6 +84,8 @@ class CapaRootCauseVerification(Base):
     conclusion: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     evidence_attachments: Mapped[list] = mapped_column(JSONB, default=lambda: [])
     source_ref: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Known read restrictions only; NULL preserves unattested legacy history.
+    r6_source_origins: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     verified_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.user_id"))
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

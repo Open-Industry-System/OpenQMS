@@ -24,14 +24,14 @@ async def _target(db, scope, report_id, access=None):
     return await current_capa_target_metadata(db, report_id, factories, lines)
 
 
-async def _visible_metadata(db, scope, report_id, access=None):
+async def _visible_metadata(db, scope, report_id, access=None, *, proposal_ids=None):
     target = await _target(db, scope, report_id, access)
     p, command = CapaD5Proposal, AgentD5Command
     proof, revision = CapaD4RootCauseSourceProof, CapaD4RootCauseRevision
     # Independent foreign keys establish existence only. Every association must
     # match this report, task and command before any proposal text is selected.
     query = (select(p.proposal_id, p.state, p.created_at, p.revision_id, p.proof_id,
-                    p.task_id, p.predecessor_id, p.correction_message_id,
+                    p.task_id, p.predecessor_id, p.correction_message_id, revision.write_path,
                     proof.factory_id, proof.product_line_code, proof.source_projection_id,
                     proof.fmea_id, proof.cause_node_id, proof.node_hmac)
         .join(command, (command.command_id == p.command_id) & (command.proposal_id == p.proposal_id)
@@ -46,6 +46,8 @@ async def _visible_metadata(db, scope, report_id, access=None):
               & (CapaRootCauseVerification.capa_id == p.report_id))
         .where(p.report_id == report_id)
         .order_by(p.created_at, p.proposal_id))
+    if proposal_ids is not None:
+        query = query.where(p.proposal_id.in_(proposal_ids))
     with db.no_autoflush:
         rows = (await db.execute(query)).all()
         sources = (await db.execute(select(CapaD5ProposalSource).where(
@@ -102,6 +104,37 @@ async def _visible_metadata(db, scope, report_id, access=None):
                 allowed = False
                 break
         if allowed:
+            from app.models.capa_r6 import CapaR6RootRevisionBody
+            controlled = await db.scalar(select(CapaR6RootRevisionBody.revision_id).where(
+                CapaR6RootRevisionBody.revision_id == row.revision_id,
+                CapaR6RootRevisionBody.binding_state == 'controlled'))
+            if controlled is None and row.write_path.startswith('r6:'):
+                any_binding = await db.scalar(select(CapaR6RootRevisionBody.revision_id).where(
+                    CapaR6RootRevisionBody.revision_id == row.revision_id))
+                if any_binding is None:
+                    continue
+            from app.services.capa_r6_delivery import task_requires_r6_sidecar
+            try:
+                r6_required = await task_requires_r6_sidecar(db, row.task_id)
+            except PermissionError:
+                continue
+            if controlled is not None or r6_required:
+                from app.models.agent_d5_basis import AgentD5BasisReceipt, AgentD5CommandBasis
+                from app.services.capa_r6_delivery import validate_root_delivery_binding
+                receipts = list(await db.scalars(select(AgentD5BasisReceipt).join(AgentD5CommandBasis,
+                    AgentD5CommandBasis.receipt_id == AgentD5BasisReceipt.receipt_id).join(AgentD5Command,
+                    AgentD5Command.command_id == AgentD5CommandBasis.command_id).where(
+                    AgentD5Command.proposal_id == row.proposal_id)))
+                if not receipts:
+                    continue
+                try:
+                    for receipt in receipts:
+                        if (receipt.report_id != report_id or receipt.revision_id != row.revision_id
+                                or receipt.proof_id != row.proof_id or receipt.task_id != row.task_id):
+                            raise PermissionError('D4 delivery binding unavailable')
+                        await validate_root_delivery_binding(db, receipt, db.info['tenant_binding'].tenant_id, scope=scope)
+                except PermissionError:
+                    continue
             visible.append(row)
             source_sets[row.proposal_id] = all_sources
     return target, visible, source_sets
@@ -115,6 +148,27 @@ async def _basis_current(db, scope, target, row, sources):
     binding = db.info.get('tenant_binding')
     if binding is None:
         return False
+    if scope is not None:
+        from app.services.capa_d4_material import require_root_freshness
+        try:
+            await require_root_freshness(db, scope.user.user_id, target.report_id)
+        except (PermissionError, LookupError):
+            return False
+    if getattr(row, 'proposal_id', None) is not None:
+        from app.services.capa_r6_delivery import task_requires_r6_sidecar, validate_root_delivery_binding
+        from app.models.agent_d5_basis import AgentD5BasisReceipt, AgentD5CommandBasis
+        try:
+            if await task_requires_r6_sidecar(db, row.task_id):
+                receipts = list(await db.scalars(select(AgentD5BasisReceipt).join(AgentD5CommandBasis,
+                    AgentD5CommandBasis.receipt_id == AgentD5BasisReceipt.receipt_id).join(AgentD5Command,
+                    AgentD5Command.command_id == AgentD5CommandBasis.command_id).where(
+                    AgentD5Command.proposal_id == row.proposal_id)))
+                if not receipts:
+                    return False
+                for receipt in receipts:
+                    await validate_root_delivery_binding(db, receipt, binding.tenant_id, scope=scope, fresh=True)
+        except (PermissionError, LookupError):
+            return False
     with db.no_autoflush:
         proof = await db.scalar(select(CapaD4RootCauseSourceProof).where(
             CapaD4RootCauseSourceProof.proof_id == row.proof_id).execution_options(populate_existing=True))
@@ -193,10 +247,13 @@ async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=Non
     for row in selected:
         with db.no_autoflush:
             if kind == 'measures':
-                body = (await db.execute(select(CapaD5Measure.measure_id, CapaD5Measure.proposal_id,
-                    CapaD5Measure.final_text, CapaD5Measure.adopted_by, CapaD5Measure.adopted_at).where(
-                    CapaD5Measure.measure_id == keys[row.proposal_id]))).one()
-                items.append(D5MeasureItem(**body._mapping))
+                from app.services.capa_d5_corrections import current_measure
+                from app.services.capa_d5_correction_material import complete_material_version
+                body = await current_measure(db, keys[row.proposal_id], report_id)
+                from app.core.permissions import Module, PermissionLevel
+                items.append(D5MeasureItem(**body,
+                    can_correct=access[0].get(Module.CAPA, PermissionLevel.NONE) >= PermissionLevel.EDIT and target.status in {'D5_CORRECTION','D6_VERIFICATION','D7_PREVENTION'},
+                    material_version=await complete_material_version(db, scope, report_id)))
             else:
                 original_text = await db.scalar(select(CapaD5Proposal.original_text).where(
                     CapaD5Proposal.proposal_id == row.proposal_id))
@@ -222,6 +279,11 @@ async def _read(db, scope, report_id, *, kind, page=1, page_size=20, item_id=Non
             or latest_target.product_line_code != target.product_line_code
             or _signature(latest_rows, latest_sources) != initial_signature):
         raise PermissionError('D5 view changed; refresh required')
+    if kind == 'measures':
+        from app.services.capa_d5_corrections import current_measure_version
+        for item in items:
+            if item.current_version != await current_measure_version(db, item.measure_id, report_id):
+                raise PermissionError('D5 measure changed; refresh required')
     if item_id is not None:
         return items[0]
     if kind == 'measures':
@@ -264,6 +326,8 @@ async def require_legacy_d5_only(db, report_id):
     """Flows without item ACL/recipient support cannot claim complete material."""
     if await _formal_ids(db, report_id):
         raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, report_id)
 
 
 async def full_d5_material(db, capa, *, scope=None, access=None):
@@ -272,6 +336,8 @@ async def full_d5_material(db, capa, *, scope=None, access=None):
     The caller provides live authority and holds the CAPA parent for decisions.
     Source scope may include other product lines, unlike legacy D4 references.
     """
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    if scope is not None: await authorize_bound_sources(db,scope.user.user_id,capa.report_id,d_step="d5")
     formal = await _formal_ids(db, capa.report_id)
     if not formal:
         return []
@@ -288,10 +354,14 @@ async def full_d5_material(db, capa, *, scope=None, access=None):
     import hmac
     from app.config import settings
     material = []
+    measure_versions = {}
     for item in formal:
         row = by_id[item.proposal_id]
-        body = (await db.execute(select(CapaD5Measure.final_text, CapaD5Measure.adopted_by,
-            CapaD5Measure.adopted_at).where(CapaD5Measure.measure_id == item.measure_id))).one()
+        from app.services.capa_d5_corrections import current_measure
+        from types import SimpleNamespace
+        current = await current_measure(db, item.measure_id, capa.report_id)
+        body = SimpleNamespace(**current)
+        measure_versions[item.measure_id] = current['current_version']
         material.append(dict(measure_id=str(item.measure_id), proposal_id=str(item.proposal_id),
             final_text=body.final_text, adopted_by=str(body.adopted_by), adopted_at=body.adopted_at.isoformat(),
             text_version=hmac.new(settings.SECRET_KEY.encode(), b'openqms.d5.measure.v1\0'
@@ -301,11 +371,22 @@ async def full_d5_material(db, capa, *, scope=None, access=None):
                 factory_id=str(s.factory_id), product_line_code=s.product_line_code,
                 fmea_id=str(s.fmea_id), node_id=s.node_id, node_hmac=s.node_hmac)
                 for s in sources[item.proposal_id]], key=lambda s: s['source_id'])))
+        if current['correction_revision_id'] is not None:
+            material[-1].update(correction_revision_id=str(current['correction_revision_id']),
+                correction_revision_no=current['correction_revision_no'], adopted_text=current['adopted_text'])
+            material[-1]['text_version'] = hmac.new(settings.SECRET_KEY.encode(),
+                b'openqms.r6.d5.measure.v2\0' + item.measure_id.bytes
+                + current['correction_revision_id'].bytes + str(current['correction_revision_no']).encode()
+                + body.final_text.encode(), hashlib.sha256).hexdigest()
     if scope is not None:
         access = await current_capa_access(db, scope)
     _, latest, latest_sources = await _visible_metadata(db, scope, capa.report_id, access)
     if signature != _signature(latest, latest_sources) or formal != await _formal_ids(db, capa.report_id):
         raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
+    from app.services.capa_d5_corrections import current_measure_version
+    for measure_id, version in measure_versions.items():
+        if version != await current_measure_version(db, measure_id, capa.report_id):
+            raise PermissionError('D5_FULL_MATERIAL_UNAVAILABLE')
     return material
 
 

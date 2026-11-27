@@ -32,7 +32,17 @@ TARGETS = (
     'tests/migrations/test_r5_responses_delta.py',
     'tests/e2e/test_r5_d5_ui.py',
     'tests/e2e/test_r5_d5_browser.py',
-
+    'tests/e2e/test_r6_entry_switch_browser.py',
+    'tests/services/agent_runtime/test_r6_d4_delivery.py',
+    'tests/capa/test_capa_reviewed_writes.py',
+    'tests/capa/test_r6_entry_switch.py',
+    'tests/capa/test_r6_legacy_capture.py',
+    'tests/services/agent_runtime/test_task_controls.py',
+    'tests/e2e/test_r7_pfmea_impact_process.py',
+    'tests/e2e/test_r7_iqc_investigation_process.py',
+    'tests/e2e/test_r7_iqc_investigation_browser.py',
+    'tests/e2e/test_r7_pfmea_impact_history_race.py',
+    'tests/e2e/test_r7_pfmea_impact_browser.py',
 )
 
 BROWSER_NODES = (
@@ -391,8 +401,10 @@ def test_fixed_r5_catalog_matches_collection_and_required_layer(collected_items)
     for mode,classes in R5_REQUIRED.items():
         for classname,names in classes.items():
             prefix=classname.replace('.','/')+'.py::'
-            assert _nodeids(collected_items,prefix)=={prefix+name for name in names}
-            for name in names:_assert_layer(collected_items,'backend' if mode=='api' else mode,prefix+name)
+            expected_layer = 'backend' if mode == 'api' else mode
+            selected = {item.nodeid for item in collected_items
+                        if item.nodeid.startswith(prefix) and layer(item) == expected_layer}
+            assert selected == {prefix + name for name in names}
 
 
 def test_r5_platform_credentials_and_pilot_configuration_never_enter_ordinary_children():

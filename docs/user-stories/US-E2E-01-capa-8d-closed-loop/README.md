@@ -1,8 +1,14 @@
 # Epic US-E2E-01：8D 全程闭环（AI 多源推荐 + 遏制措施 + 根因现场验证 + 流程可视化 + 跨模块联动 + 知识沉淀）
 
-**状态**: 定稿 v8.1（2026-07-08），经 3 轮评审修订后转定稿
+**状态**: R6 契约同步 v8.2（2026-11-17）；v8.1 及其历史验收保留
 **关联**: E2E 测试套件（`docs/superpowers/specs/2026-07-01-system-e2e-test-suite-design.md`）
 **前序版本**: v7（2026-07-07，见 git 历史，原为单文件形态）；v8（2026-07-08，6 子故事，评审后拆分扩为 10 子故事）
+
+## 当前 R6 验收分支
+
+旧 12 源推荐、跨模块正文沉淀和自动传播属于下文历史/独立场景。switched 报告按 [R6 验证剧本](R6-verify.md)验候选→员工确认→独立验证证明→D5 采纳/正式更正→本地人工 D7/文档门禁→审批/PPT；四个传播通道明确 NOT_EXECUTED。此分支不要求重跑已退役入口，也不能把未执行传播计作旧 epic 全通过。draining 保持关闭，legacy 才用原场景。R6 默认关闭，发布/部署另行批准。
+
+验收事实更新于 2026-11-18（Asia/Shanghai）：本版剧本的确定性 API/native/process/Chrome 走查及全量前端检查已实际通过；用户授权的额外地址验收分类保留 TLS/DNS-pins/来源权限，本次 `be42580` 真实 Terra C9 已原始单次 1/1 PASS，同报告新 C10 已实际 21/21 PASS，589 个内部合同用例及 31 条语义覆盖全通过且无新增模型调用。最终独立复审与本地交接仍待完成；本轮合成报告验收不等于全部 epic 或上线完成；当前事实见 [R6 操作说明](../../development/r6-entry-switch-operations.md)。
 
 ## 故事
 
@@ -41,15 +47,15 @@ D8 关闭后知识沉淀 + 横向扩散预警 + 报告输出——
 | 编号 | 子故事 | 文件 | 状态 | AI_REQUIRED |
 |---|---|---|---|---|
 | 01.1 | D3 遏制措施（数据导入 + AI 分析报告 + 遏制建议） | `US-E2E-01.1-d3-containment-ai.md` | 定稿 v1 | true |
-| 01.2 | AI 推荐 12 源全接入（编排 DAG + provenance + 执行验证） | `US-E2E-01.2-recommendation-12-sources.md` | 定稿 v1 | true |
-| 01.3 | D4 现场验证深化 + D7 node-action + 审批壳 | `US-E2E-01.3-d4-verification-d7-node-action.md` | 定稿 v2 | true |
+| 01.2 | AI 推荐 12 源全接入（编排 DAG + provenance + 执行验证） | `US-E2E-01.2-recommendation-12-sources.md` | R6 v2 | true |
+| 01.3 | D4 现场验证深化 + D7 node-action + 审批壳 | `US-E2E-01.3-d4-verification-d7-node-action.md` | R6 v3 | true |
 | 01.4 | 8D ↔ FMEA 双向追溯 | `US-E2E-01.4-fmea-linkage.md` | 定稿 v1 | false |
 | 01.5 | 8D → SCAR 触发与回写 | `US-E2E-01.5-scar-trigger.md` | 定稿 v1 | false |
-| 01.6 | 8D → 供应商风险评级输入 | `US-E2E-01.6-supplier-risk-input.md` | 定稿 v1 | false |
-| 01.7 | D8 关闭前文档更新审核门禁（CP+FMEA；设计 C1） | `US-E2E-01.7-doc-update-gate.md` | 定稿 v3 | true |
-| 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | 定稿 v2 | true |
-| 01.9 | 横向扩散预警与通知 | `US-E2E-01.9-lateral-diffusion.md` | 定稿 v1 | true |
-| 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | 定稿 v2 | false |
+| 01.6 | 8D → 供应商风险评级输入 | `US-E2E-01.6-supplier-risk-input.md` | R6 v2 | false |
+| 01.7 | D8 关闭前文档更新审核门禁（CP+FMEA；设计 C1） | `US-E2E-01.7-doc-update-gate.md` | R6 v4 | true |
+| 01.8 | 8D 知识库沉淀 | `US-E2E-01.8-knowledge-sink.md` | R6 v3 | true |
+| 01.9 | 横向扩散预警与通知 | `US-E2E-01.9-lateral-diffusion.md` | R6 v3 | true |
+| 01.10 | 8D 报告 PPT 输出 | `US-E2E-01.10-ppt-output.md` | R6 v5 | false |
 
 > **AI_REQUIRED**：true = 该子故事有 AI 步骤，无 LLM 凭证时验收为 `BLOCKED`（环境缺失，不可降级）；false = 该子故事无 AI 步骤，但功能错误时为 `FAILED`。
 

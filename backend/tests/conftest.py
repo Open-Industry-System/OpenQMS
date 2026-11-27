@@ -155,12 +155,13 @@ _assert_not_seed_db(_test_db_url)
 # pooled connections that outlive the event loop of the test that created them.
 import app.database as _db_mod
 
-_db_mod.engine = create_async_engine(_test_db_url, echo=False, poolclass=NullPool)
+# Keep the production parameter-hiding policy on the NullPool replacement.
+_db_mod.engine = create_async_engine(_test_db_url, echo=False, hide_parameters=True, poolclass=NullPool)
 _db_mod.async_session = async_sessionmaker(_db_mod.engine, class_=AsyncSession, expire_on_commit=False)
 
 # Test-scoped engine with NullPool so every session gets a fresh connection
 # (avoids "another operation is in progress" cross-test contamination)
-_test_engine = create_async_engine(_test_db_url, poolclass=NullPool)
+_test_engine = create_async_engine(_test_db_url, hide_parameters=True, poolclass=NullPool)
 _test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
 
 # Stable UUID for the default test factory

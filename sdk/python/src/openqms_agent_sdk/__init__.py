@@ -5,9 +5,11 @@ from .errors import (
 )
 
 from .models import (
-    ClientConfig, RunClaim, Capability, Capabilities, RuntimeMessage, MessageBatch,
+    ManagedLaunch, ModelTurn, ModelToolCall, ModelToolResult, D4CandidateCheckpoint, D4CandidateReference, ClientConfig, RunClaim, Capability, Capabilities, RuntimeMessage, MessageBatch,
     MessageAck, MessageHistory, Verification, CapaContext, EventPayload,
     ResultPayload, Source, RuntimeEvent, RuntimeResult, ReadonlyCheckpoint, FinishResult,
+    PfmeaImpactRelease, PfmeaImpactConfirmation, PfmeaImpactResultRef,
+    PfmeaImpactAnalysis, PfmeaImpactAdjustment, PfmeaImpactAssessment,
 )
 
 from .client import InstallationClient, RunClient
@@ -17,8 +19,10 @@ __all__ = [
     "__version__", "SDKError", "ConfigError", "ValidationError", "TransportError",
     "RequestTimeout", "HTTPError", "ProtocolError", "ResponseTooLarge",
     "UnknownOutcome", "ClientClosed", "ClientBusy",
-    "ClientConfig", "RunClaim", "Capability", "Capabilities", "RuntimeMessage",
+    "ManagedLaunch", "ModelTurn", "ModelToolCall", "ModelToolResult", "D4CandidateCheckpoint", "D4CandidateReference", "ClientConfig", "RunClaim", "Capability", "Capabilities", "RuntimeMessage",
     "MessageBatch", "MessageAck", "MessageHistory", "Verification", "CapaContext",
     "EventPayload", "ResultPayload", "Source", "RuntimeEvent", "RuntimeResult",
     "ReadonlyCheckpoint", "FinishResult", "InstallationClient", "RunClient",
+    "PfmeaImpactRelease", "PfmeaImpactConfirmation", "PfmeaImpactResultRef",
+    "PfmeaImpactAnalysis", "PfmeaImpactAdjustment", "PfmeaImpactAssessment",
 ]

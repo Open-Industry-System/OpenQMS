@@ -32,7 +32,8 @@ async def validate_message_position(db, task_id, watermark):
 
 
 async def create_paused_checkpoint(db, scope, task_id, run_id, expected_epoch):
-    task=await task_controls.task_service.get_task_for_view(db,scope,task_id)
+    task=await task_controls.task_service.get_task_for_control(db,scope,task_id)
+    AgentD5CheckpointPosition,AgentD5Command=await ledger_models(db,task)
     run=await task_controls._current_run(db,task_id)
     task_binding,run_binding=task_controls._task_binding(task),task_controls._run_binding(run)
     await db.scalar(select(AgentPluginInstallation.installation_id).where(
@@ -77,6 +78,7 @@ async def create_paused_checkpoint(db, scope, task_id, run_id, expected_epoch):
 
 
 async def require_restart_position(db, scope, task, run, checkpoint_id):
+    AgentD5CheckpointPosition,_=await ledger_models(db,task)
     await d4_recovery.get_checkpoint(db,scope,task.task_id,checkpoint_id)
     cp=await db.get(D4RecoveryCheckpoint,checkpoint_id,populate_existing=True)
     ledger=await db.get(AgentD5CheckpointPosition,checkpoint_id,populate_existing=True)
@@ -91,6 +93,7 @@ async def require_restart_position(db, scope, task, run, checkpoint_id):
 
 async def restart_mapping(db, task, run):
     """Return a strictly associated recovery mapping for a new run, if any."""
+    AgentD5CheckpointPosition,_=await ledger_models(db,task)
     with db.no_autoflush:
         link = await db.scalar(select(D4RecoveryRestart).where(
             D4RecoveryRestart.new_run_id == run.run_id).execution_options(populate_existing=True))
@@ -145,3 +148,12 @@ async def restart_mapping(db, task, run):
     if ledger is None or ledger.task_id != task.task_id:
         raise PermissionError('Recovery unavailable')
     return link
+
+
+async def ledger_models(db, task):
+    from app.services.capa_d4_candidates import is_d4_task
+    if await is_d4_task(db,task):
+        from app.models.capa_r6 import AgentD4CandidateCheckpointPosition,AgentD4CandidateCommand
+        return AgentD4CandidateCheckpointPosition,AgentD4CandidateCommand
+    from app.models.agent_d5_command import AgentD5CheckpointPosition,AgentD5Command
+    return AgentD5CheckpointPosition,AgentD5Command

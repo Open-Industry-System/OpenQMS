@@ -18,7 +18,19 @@ class TaskCreate(BaseModel):
     model_deployment_id: UUID | None = None
 
 
+class IqcInvestigationCreate(BaseModel):
+    """Fixed IQC operation. The inspection ID is supplied by the route."""
+
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    expected_version: Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
+    request_key: Annotated[str, StringConstraints(strict=True, min_length=1, max_length=100)]
+    model_deployment_id: UUID
+    previous_result_id: UUID | None = None
+
+
 class BoundModelDeployment(BaseModel):
+    profile: Literal['model_d4_candidate_v1','model_d5_proposal_v1','model_d5_proposal_r6_v1']
     deployment_id: UUID
     name: str
     version: str

@@ -49,13 +49,24 @@ _STATUS_ORDER = [
 
 # ---------- 全局内存缓存（仅支持单 worker） ----------
 
-_draft_cache: dict[str, tuple[dict, float]] = {}
+_draft_cache: dict[str, tuple] = {}
 _rate_limit: dict[str, list[float]] = {}
 _in_flight: dict[str, asyncio.Task] = {}
+_in_flight_bindings: dict[str, tuple] = {}
+
+
+def _recipient_binding(pc):
+    import hashlib
+    import json
+    provider, model = getattr(pc, 'provider', None), getattr(pc, 'model', None)
+    endpoint = getattr(pc, 'base_url', None) or getattr(getattr(pc, 'client', None), 'base_url', None)
+    if not all(isinstance(value, str) and value for value in (provider, model)) or endpoint is None:
+        return None
+    return hashlib.sha256(json.dumps([provider, model, str(endpoint).rstrip('/')]).encode()).hexdigest()
 
 
 def _cleanup_expired_cache(now: float) -> None:
-    expired = [k for k, (_, expire) in _draft_cache.items() if expire < now]
+    expired = [k for k, value in _draft_cache.items() if value[1] < now]
     for k in expired:
         del _draft_cache[k]
 
@@ -175,18 +186,52 @@ def _render_structured(step: str, data: dict) -> str:
 
 # ---------- FMEA 上下文构建 ----------
 
-async def _build_fmea_context(db, capa, user) -> str | None:
+async def _capture_fmea_context_bindings(db, capa, user):
+    from types import SimpleNamespace
+    from sqlalchemy import select
+    from app.services.fmea_agent_sources import visible_fmea_source
     if not capa.fmea_ref_id or not capa.fmea_node_id:
-        return None
-
-    fmea = await db.get(FMEADocument, capa.fmea_ref_id)
-    if not fmea:
-        return "FMEA 文档已不存在"
-
+        return ()
     try:
-        await enforce_product_line_access(user, fmea.product_line_code, db)
-    except HTTPException:
-        return "当前用户无权查看关联 FMEA"
+        visible = await visible_fmea_source(db, SimpleNamespace(user=user), capa.fmea_ref_id)
+    except PermissionError:
+        return ()
+    row = (await db.execute(select(FMEADocument.factory_id, FMEADocument.product_line_code,
+        FMEADocument.lock_version, FMEADocument.document_no, FMEADocument.fmea_type).where(FMEADocument.fmea_id == visible.fmea_id,
+        FMEADocument.factory_id == visible.factory_id,
+        FMEADocument.product_line_code == visible.product_line_code))).one_or_none()
+    if row is None or type(row.lock_version) is not int or row.lock_version < 0:
+        raise PermissionError('FMEA_DRAFT_SOURCE_UNAVAILABLE')
+    return ((str(visible.fmea_id), str(row.factory_id), row.product_line_code,
+             row.lock_version, str(capa.fmea_node_id), row.document_no, row.fmea_type),)
+
+
+async def _require_fmea_context_bindings(db, user, bindings):
+    from types import SimpleNamespace
+    from uuid import UUID
+    for original in bindings:
+        current = await _capture_fmea_context_bindings(db,
+            SimpleNamespace(fmea_ref_id=UUID(original[0]), fmea_node_id=original[4]), user)
+        if current != (original,):
+            raise PermissionError('FMEA_DRAFT_SOURCE_UNAVAILABLE')
+
+
+async def _build_fmea_context(db, capa, user) -> str | None:
+    from sqlalchemy import select
+    bindings = await _capture_fmea_context_bindings(db, capa, user)
+    if not bindings:
+        return None
+    binding = bindings[0]
+    await _require_fmea_context_bindings(db, user, bindings)
+    fmea = (await db.scalars(select(FMEADocument).where(
+        FMEADocument.fmea_id == capa.fmea_ref_id,
+        FMEADocument.factory_id == uuid.UUID(binding[1]),
+        FMEADocument.product_line_code == binding[2], FMEADocument.lock_version == binding[3],
+        FMEADocument.document_no == binding[5], FMEADocument.fmea_type == binding[6])
+        .execution_options(populate_existing=True))).one_or_none()
+    await _require_fmea_context_bindings(db, user, bindings)
+    if fmea is None:
+        raise PermissionError('FMEA_DRAFT_SOURCE_UNAVAILABLE')
 
     graph = fmea.graph_data or {"nodes": [], "edges": []}
     nodes = {n["id"]: n for n in graph.get("nodes", []) if "id" in n}
@@ -262,6 +307,32 @@ async def generate_draft(
     audit_status_code = 200
     result = None
     normalized_request_id = None
+    fmea_bindings = ()
+
+    async def release_binding(*, initial=False):
+        from app.core.permissions import PermissionLevel
+        from app.services.capa_current_access import current_capa_actor_access, current_capa_target_metadata
+        from app.services.capa_d4_material import material_version, require_current_egress_statement
+        try:
+            await require_current_egress_statement(db)
+            factories, lines = await current_capa_actor_access(db, user.user_id, PermissionLevel.EDIT)
+            await current_capa_target_metadata(db, report_id, factories, lines)
+            if step in {"d4", "d5"}:
+                from app.services.capa_entry_switch import admit
+                await admit(db, "legacy")
+            await require_legacy_d5_only(db, report_id)
+            await _require_fmea_context_bindings(db, user, fmea_bindings)
+            return await material_version(db, report_id)
+        except LookupError:
+            if initial:
+                raise HTTPException(status_code=404, detail='CAPA 报告不存在') from None
+            raise HTTPException(status_code=403, detail='D4_DRAFT_MATERIAL_UNAVAILABLE') from None
+        except PermissionError:
+            raise HTTPException(status_code=403, detail='D4_DRAFT_MATERIAL_UNAVAILABLE') from None
+
+    async def require_binding(expected):
+        if await release_binding() != expected:
+            raise HTTPException(status_code=403, detail='D4_DRAFT_MATERIAL_CHANGED')
 
     async def _write_audit():
         """Write audit log for every call (success or failure) in a separate session.
@@ -307,6 +378,8 @@ async def generate_draft(
         cache_key = f"{user.user_id}:{report_id}:{step}:{req.format}:{normalized_request_id}"
         user_limit_key = str(user.user_id)
 
+        # Admit current actor/target and classify protected material using metadata.
+        initial_binding = await release_binding(initial=True)
         # 1. 获取 CAPA 实体
         capa = await db.get(CAPAEightD, report_id)
         if not capa:
@@ -319,10 +392,8 @@ async def generate_draft(
             check_factory_access(capa.factory_id, scope)
             check_product_line_access(capa.product_line_code, scope)
         await enforce_product_line_access(user, capa.product_line_code, db)
-        try:
-            await require_legacy_d5_only(db, report_id)
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail="D5_FULL_MATERIAL_UNAVAILABLE") from exc
+        fmea_bindings = await _capture_fmea_context_bindings(db, capa, user)
+        await require_binding(initial_binding)
 
         # No provider configuration or cached/model output is consulted for
         # item-protected formal material in this legacy recipient flow.
@@ -331,11 +402,24 @@ async def generate_draft(
         except ProviderNotConfiguredError:
             pc = None
         llm_model_name = (pc.model if pc else None) or settings.LLM_MODEL or "unknown"
+        recipient_binding = _recipient_binding(pc)
 
         # 3. 检查缓存（在权限校验之后）
         if cache_key in _draft_cache:
-            cached_result, expire = _draft_cache[cache_key]
-            if start_time < expire:
+            cached = _draft_cache[cache_key]
+            # Entries from the old process contract carry no origin/revision
+            # or recipient binding and cannot be promoted into usable results.
+            if len(cached) == 3:
+                cached_result, expire, binding = cached
+            else:
+                cached_result, expire, binding = None, 0, None
+            if isinstance(binding, tuple) and len(binding) == 3:
+                try:
+                    await _require_fmea_context_bindings(db, user, binding[2])
+                except PermissionError:
+                    raise HTTPException(status_code=403, detail='FMEA_DRAFT_SOURCE_UNAVAILABLE') from None
+            if recipient_binding is not None and start_time < expire and binding == (initial_binding, recipient_binding, fmea_bindings):
+                await require_binding(initial_binding)
                 audit_success = True
                 audit_status_code = 200
                 return cached_result
@@ -395,8 +479,17 @@ async def generate_draft(
 
         # 9. in-flight 复用
         if cache_key in _in_flight:
+            original = _in_flight_bindings.get(cache_key)
+            if isinstance(original, tuple) and len(original) == 3:
+                try:
+                    await _require_fmea_context_bindings(db, user, original[2])
+                except PermissionError:
+                    raise HTTPException(status_code=403, detail='FMEA_DRAFT_SOURCE_UNAVAILABLE') from None
+            if recipient_binding is None or _in_flight_bindings.get(cache_key) != (initial_binding, recipient_binding, fmea_bindings):
+                raise HTTPException(status_code=403, detail='D4_DRAFT_RECIPIENT_CHANGED')
             try:
                 result = await asyncio.shield(_in_flight[cache_key])
+                await require_binding(initial_binding)
                 audit_success = True
                 audit_status_code = 200
                 return result
@@ -410,7 +503,8 @@ async def generate_draft(
             raise HTTPException(status_code=503, detail="AI 服务未配置")
 
         # 11. FMEA 上下文
-        fmea_context = await _build_fmea_context(db, capa, user)
+        fmea_context = await _build_fmea_context(db, capa, user) if fmea_bindings else None
+        await require_binding(initial_binding)
 
         # 12. Prompt
         try:
@@ -426,9 +520,14 @@ async def generate_draft(
         async def _generate_and_validate():
             try:
                 llm_raw = await asyncio.wait_for(
-                    provider_adapter.complete_json(pc, prompt, response_schema),
+                    provider_adapter.with_delivery_guard(lambda: require_binding(initial_binding),
+                        lambda: provider_adapter.complete_json(pc, prompt, response_schema)),
                     timeout=capa_draft_llm_timeout,
                 )
+            except HTTPException:
+                raise
+            except PermissionError:
+                raise HTTPException(status_code=403, detail="D4_DELIVERY_UNAVAILABLE") from None
             except TimeoutError:
                 raise HTTPException(status_code=504, detail="AI 响应超时，请重试")
             except (ConnectionError, OSError) as e:
@@ -443,14 +542,14 @@ async def generate_draft(
                 try:
                     validated = ParagraphLLMOutput.model_validate(llm_raw)
                 except Exception as e:
-                    raise HTTPException(status_code=422, detail=f"AI 输出格式校验失败: {str(e)}")
+                    raise HTTPException(status_code=422, detail="AI 输出格式校验失败") from None
                 content = validated.content
                 structured_data = None
             else:
                 try:
                     validated = schema_cls.model_validate(llm_raw)
                 except Exception as e:
-                    raise HTTPException(status_code=422, detail=f"AI 输出格式校验失败: {str(e)}")
+                    raise HTTPException(status_code=422, detail="AI 输出格式校验失败") from None
                 structured_data = validated.structured_data.model_dump()
                 content = _render_structured(step, structured_data)
 
@@ -460,14 +559,18 @@ async def generate_draft(
                 "request_id": normalized_request_id,
                 "step": step,
             }
+            await require_binding(initial_binding)
             _cleanup_expired_cache(start_time)
-            _draft_cache[cache_key] = (res, start_time + 60)
+            if recipient_binding is not None:
+                _draft_cache[cache_key] = (res, start_time + 60, (initial_binding, recipient_binding, fmea_bindings))
             return res
 
         task = asyncio.ensure_future(_generate_and_validate())
         _in_flight[cache_key] = task
+        _in_flight_bindings[cache_key] = (initial_binding, recipient_binding, fmea_bindings)
         try:
             result = await task
+            await require_binding(initial_binding)
             audit_success = True
             audit_status_code = 200
             return result
@@ -481,14 +584,21 @@ async def generate_draft(
             raise HTTPException(status_code=503, detail="AI 服务异常，请稍后重试") from e
         finally:
             _in_flight.pop(cache_key, None)
+            _in_flight_bindings.pop(cache_key, None)
 
     except HTTPException as exc:
         audit_status_code = exc.status_code
         audit_error = exc.detail
         raise
+    except PermissionError:
+        audit_status_code = 403
+        audit_error = 'FMEA_DRAFT_SOURCE_UNAVAILABLE'
+        raise HTTPException(status_code=403, detail=audit_error) from None
     except Exception as e:
         audit_status_code = 500
         audit_error = str(e)
         raise
     finally:
         await _write_audit()
+        if audit_success:
+            await require_binding(initial_binding)

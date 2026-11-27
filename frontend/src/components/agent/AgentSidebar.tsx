@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {listFMEAs,getFMEA} from '../../api/fmea';
+import {useCapaCredentialIdentity} from '../capa/useCapaViewRequests';
 import { Button, Drawer } from "antd";
 import { appendTaskMessage, controlTask, createTask, listTaskInstallations, listTasks, listModelDeployments, launchTask, getTaskWorkflow, listTaskD5Checkpoints } from "../../api/agentTasks";
 import type { D5CheckpointReference } from "../../api/agentTasks";
 import type { AgentTask, ModelChoice, TaskWorkflow, InstallationChoice, TaskAction, TaskControl, TaskCreate, TaskMessageCreate } from "../../types/agentTask";
 import { listTaskD5Proposals, type D5Proposal } from "../../api/d5Proposals";
+import D4CandidatePanel from '../capa/D4CandidatePanel';
 import D5ProposalPanel from "../capa/D5ProposalPanel";
 import AgentActivity from "./AgentActivity";
+import PfmeaImpactPanel from "./PfmeaImpactPanel";
+import { pfmeaImpactAvailable, pfmeaImpactClient } from "../../api/pfmeaImpact";
 import AgentTaskAttachments from "./AgentTaskAttachments";
 import { useAgentTaskContext } from "./AgentTaskContext";
 import { readAgentIdentity, useAgentTaskActivity } from "./useAgentTaskActivity";
@@ -21,8 +26,41 @@ type Operation = {
   kind: "create";
   body: TaskCreate;
 };
-export default function AgentSidebar() {
+function PfmeaImpactEntry({reportId, identity, authorityEpoch, requestKeys}: {
+  reportId: string; identity: string; authorityEpoch: number; requestKeys: Map<string, string>;
+}) {
+  const [availability, setAvailability] = useState<Awaited<ReturnType<typeof pfmeaImpactAvailable>>>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void pfmeaImpactAvailable(reportId, controller.signal).then(state => {
+      if (!controller.signal.aborted && identity === readAgentIdentity()) setAvailability(state);
+    }).catch(() => {
+      if (!controller.signal.aborted) setAvailability(null);
+    });
+    return () => controller.abort();
+  }, [reportId, identity, authorityEpoch]);
+
+  return availability?.available ? <PfmeaImpactPanel
+    reportId={reportId}
+    scopeKey={identity}
+    authorityEpoch={authorityEpoch}
+    canGenerate={availability.canGenerate}
+    requestKeyStore={requestKeys}
+    client={pfmeaImpactClient}
+  /> : null;
+}
+
+export default function AgentSidebar(){const {identity}=useCapaCredentialIdentity();return <ScopedAgentSidebar key={identity}/>;}
+function ScopedAgentSidebar() {
   const ctx = useAgentTaskContext();
+  const impactRequestKeys = useMemo(() => new Map<string, string>(), [ctx?.identity, ctx?.creationReportId, ctx?.requestEpoch]);
+  const [fmeaPage,setFmeaPage]=useState(1);
+  const [fmeaChoices,setFmeaChoices]=useState<{fmea_id:string;title:string;document_no:string;status?:string}[]>([]);
+  const [fmeaTotal,setFmeaTotal]=useState(0);
+  const [fmeaId,setFmeaId]=useState('');
+  const [causeChoices,setCauseChoices]=useState<{id:string;name:string}[]>([]);
+  const [causeId,setCauseId]=useState('');
+  const [taskMode,setTaskMode]=useState<"d4"|"d5">("d5");
   const activity = useAgentTaskActivity({
     taskId: ctx?.selectedTask?.task_id ?? null,
     identity: ctx?.identity ?? "",
@@ -165,7 +203,7 @@ export default function AgentSidebar() {
   useEffect(() => {
     const controller = new AbortController();
     setCorrections([]); setCorrectionId(""); setCorrectionTotal(0);
-    if(ctx?.open && ctx.selectedTask?.model_deployment)
+    if(ctx?.open && ctx.selectedTask?.model_deployment&&ctx.selectedTask.model_deployment.profile!=='model_d4_candidate_v1')
       void listTaskD5Proposals(ctx.selectedTask.target_capa_id,ctx.selectedTask.task_id,correctionPage,controller.signal).then(data=>{
         if(!controller.signal.aborted && ctx.identity === readAgentIdentity()){setCorrections(data.items);setCorrectionTotal(data.total);}
       }).catch(()=>{if(!controller.signal.aborted) setCorrections([]);});
@@ -175,12 +213,26 @@ export default function AgentSidebar() {
   useEffect(()=>{
     const controller=new AbortController();
     setCheckpoints([]);setCheckpointTotal(0);
-    if(ctx?.open && ctx.selectedTask?.model_deployment)
+    if(ctx?.open && ctx.selectedTask?.model_deployment&&ctx.selectedTask.model_deployment.profile!=='model_d4_candidate_v1')
       void listTaskD5Checkpoints(ctx.selectedTask.task_id,checkpointPage,controller.signal).then(data=>{
         if(!controller.signal.aborted && ctx.identity===readAgentIdentity()){setCheckpoints(data.items);setCheckpointTotal(data.total);}
       }).catch(()=>{if(!controller.signal.aborted){setCheckpoints([]);setSelectedCheckpoint(null);}});
     return ()=>controller.abort();
   },[ctx?.identity,ctx?.credential,ctx?.selectedTask?.task_id,ctx?.open,ctx?.requestEpoch,checkpointPage,workflow?.checkpoint_id]);
+  useEffect(()=>{
+    const controller=new AbortController();setFmeaChoices([]);setFmeaTotal(0);setFmeaId('');setCauseChoices([]);setCauseId('');
+    if(ctx?.available&&ctx.open&&ctx.creationReportId&&taskMode==='d4')void listFMEAs({page:fmeaPage,page_size:20},controller.signal).then(value=>{
+      if(!controller.signal.aborted&&ctx.identity===readAgentIdentity()){setFmeaChoices(value.items);setFmeaTotal(value.total);}
+    }).catch(()=>{if(!controller.signal.aborted){setFmeaChoices([]);setFmeaTotal(0);}});
+    return()=>controller.abort();
+  },[ctx?.identity,ctx?.credential,ctx?.creationReportId,ctx?.open,ctx?.requestEpoch,taskMode,fmeaPage]);
+  useEffect(()=>{
+    const controller=new AbortController();setCauseChoices([]);setCauseId('');
+    if(ctx?.creationReportId&&fmeaId&&taskMode==='d4')void getFMEA(fmeaId,controller.signal).then(doc=>{
+      if(!controller.signal.aborted&&ctx.identity===readAgentIdentity())setCauseChoices((doc.graph_data?.nodes??[]).filter(node=>node.type==='FailureCause').map(node=>({id:node.id,name:node.name??node.id})));
+    }).catch(()=>{if(!controller.signal.aborted){setCauseChoices([]);setFmeaId('');}});
+    return()=>controller.abort();
+  },[ctx?.identity,ctx?.credential,ctx?.creationReportId,ctx?.requestEpoch,fmeaId,taskMode]);
   useEffect(() => setModelId(""), [ctx?.identity, ctx?.creationReportId]);
   async function execute(op: Operation) {
     if (!ctx || busy.current || ctx.identity !== readAgentIdentity())
@@ -262,7 +314,9 @@ export default function AgentSidebar() {
   const selectedInstallation = installations?.find(item => item.installation_id === installationId);
   const needsModel = selectedInstallation?.plugin_key === "openqms.controlled-d5-model";
   const boundModel = ctx.selectedTask?.model_deployment;
-  const selectedModel = models.find(model=>model.deployment_id===modelId);
+  const availableModels=models.filter(model=>taskMode==='d4'?model.profile==='model_d4_candidate_v1':model.profile==='model_d5_proposal_r6_v1');
+  const selectedModel = availableModels.find(model=>model.deployment_id===modelId);
+  const boundD4=boundModel?.profile==='model_d4_candidate_v1';
   const newTaskRecipient = selectedModel ? `${selectedModel.name} · ${selectedModel.version}` : "所选模型";
   return <>
     <Button ref={trigger} onClick={() => ctx.setOpen(true)}>Agent 任务</Button>
@@ -277,6 +331,13 @@ export default function AgentSidebar() {
       }}
       destroyOnClose>
       <Button onClick={() => ctx.setOpen(false)}>关闭任务侧栏</Button>
+      {ctx.open && ctx.creationReportId && <PfmeaImpactEntry
+        key={JSON.stringify([ctx.identity, ctx.creationReportId, ctx.requestEpoch])}
+        reportId={ctx.creationReportId}
+        identity={ctx.identity}
+        authorityEpoch={ctx.requestEpoch}
+        requestKeys={impactRequestKeys}
+      />}
       <label>选择任务<select
         aria-label="选择任务"
         value={ctx.selectedTask?.task_id ?? ""}
@@ -299,22 +360,25 @@ export default function AgentSidebar() {
           onChange={e => setInstallation(e.target.value)}>{installations?.map(choice => <option key={choice.installation_id} value={choice.installation_id}>{choice.plugin_key} · {choice.plugin_version}</option>)}</select>
         </label>
         {installations?.length === 0 && <p>暂无适用于本报告的插件安装，无法创建任务。</p>}
+        {needsModel&&<label>新任务类型<select aria-label="新任务类型" value={taskMode} disabled={pending||!!retry} onChange={e=>{setTaskMode(e.target.value as typeof taskMode);setModelId('');}}><option value="d4">D4 根因分析</option><option value="d5">D5 措施建议</option></select></label>}
         {needsModel && <label>新任务模型<select aria-label="新任务模型" value={modelId} disabled={pending || retry !== null} onChange={e => setModelId(e.target.value)}>
-          <option value="">请选择批准的模型版本</option>{models.map(model => <option key={model.deployment_id} value={model.deployment_id}>{model.name} · {model.version} · {model.kind}</option>)}
+          <option value="">请选择批准的模型版本</option>{availableModels.map(model => <option key={model.deployment_id} value={model.deployment_id}>{model.name} · {model.version} · {model.kind}</option>)}
         </select><p>新任务独立创建，不转交当前任务的聊天或资料。</p></label>}
-        {needsModel && models.length === 0 && <p>暂无可用的批准模型部署。</p>}
+        {needsModel && availableModels.length === 0 && <p>暂无可用的批准模型部署。</p>}
         {needsModel && <>
-          <Button disabled={pending || retry !== null || !installationId || !models.some(model=>model.deployment_id===modelId)} onClick={()=>void execute({kind:"create",body:{report_id:ctx.creationReportId!,installation_id:installationId,model_deployment_id:modelId,request_key:crypto.randomUUID(),initial_text:"deliver_d4_root_cause_candidate_v1"}})}>{`用 ${newTaskRecipient} 开始新任务（仅根据当前根因）`}</Button>
-          <p>附加资料可用于对话；保存共享建议需要可核对的完整来源。</p>
+          {taskMode==='d4'&&<section><label>D4 输入 FMEA<select aria-label="D4 输入 FMEA" value={fmeaId} disabled={pending||!!retry} onChange={e=>setFmeaId(e.target.value)}><option value="">选择当前有权读取的 FMEA</option>{fmeaChoices.map(doc=><option key={doc.fmea_id} value={doc.fmea_id}>{doc.document_no} · {doc.title} · {doc.status??""}</option>)}</select></label><Button disabled={pending||!!retry||fmeaPage<=1} onClick={()=>setFmeaPage(p=>p-1)}>上一页 D4 输入</Button><Button disabled={pending||!!retry||fmeaPage*20>=fmeaTotal} onClick={()=>setFmeaPage(p=>p+1)}>下一页 D4 输入</Button>
+          <label>D4 输入原因节点<select aria-label="D4 输入原因节点" value={causeId} disabled={pending||!!retry||!fmeaId} onChange={e=>setCauseId(e.target.value)}><option value="">选择已维护的原因节点</option>{causeChoices.map(cause=><option key={cause.id} value={cause.id}>{cause.name}</option>)}</select></label><p>输入必须与目标报告同工厂、同产品线，最终由服务端核对。这里只选择已有来源，不补写事实或声明来源不受限。</p></section>}
+          <Button disabled={pending || retry !== null || !installationId || !selectedModel||(taskMode==='d4'&&(!fmeaChoices.some(doc=>doc.fmea_id===fmeaId)||!causeChoices.some(cause=>cause.id===causeId)))} onClick={()=>void execute({kind:"create",body:{report_id:ctx.creationReportId!,installation_id:installationId,model_deployment_id:modelId,request_key:crypto.randomUUID(),initial_text:taskMode==='d4'?'analyze_d4_candidate_v1':'deliver_d4_root_cause_candidate_v1',...(taskMode==='d4'?{derived_source_scope:{target_report_id:ctx.creationReportId!,fmea_id:fmeaId,cause_node_id:causeId}}:{})}})}>{taskMode==='d4'?'开始 D4 根因分析候选任务':`用 ${newTaskRecipient} 开始新任务（仅根据当前根因）`}</Button>
+          <p>{taskMode==='d4'?'新增事实请先维护 D2/D3/FMEA，再重新捕获；D4 只接受不含新增事实的结构化意图。':'附加资料可用于对话；保存共享建议需要可核对的完整来源。证明不足时请手工维护 D5。'}</p>
         </>}
-        <label>初始指令<textarea
+        {(!needsModel||taskMode==='d5')&&<><label>初始指令<textarea
           aria-label="初始指令"
           maxLength={10000}
           value={initialText}
           disabled={pending || retry !== null || !installations?.length}
           onChange={e => setInitialText(e.target.value)} />
         </label>
-        <Button disabled={pending || retry !== null || !installationId || !initialText.trim() || (needsModel && !models.some(model => model.deployment_id === modelId))} onClick={() => void execute({
+        <Button disabled={pending || retry !== null || !installationId || !initialText.trim() || (needsModel && !selectedModel)} onClick={() => void execute({
           kind: "create", body: {
             report_id: ctx.creationReportId!,
             installation_id: installationId,
@@ -322,7 +386,7 @@ export default function AgentSidebar() {
             initial_text: initialText,
             ...(needsModel ? {model_deployment_id:modelId} : {})
           }
-        })}>{needsModel ? `用 ${newTaskRecipient} 开始新任务（自由对话）` : "创建任务"}</Button>
+        })}>{needsModel ? `用 ${newTaskRecipient} 开始新任务（自由对话）` : "创建任务"}</Button></>}
       </section>}
       {ctx.selectedTask && <>
         {boundModel && <section aria-label="当前任务模型">
@@ -330,16 +394,16 @@ export default function AgentSidebar() {
           <p>部署版本 {boundModel.deployment_id}</p>
           <Button disabled={launchPending || page?.task_status !== 'ready' || page?.run_status === 'active'} onClick={() => void launch()}>启动模型任务</Button>
           <p>{launchNotice}</p>
-          <label>更正当前任务建议<select aria-label="更正当前任务建议" value={correctionId} disabled={pending || retry !== null} onChange={e=>setCorrectionId(e.target.value)}>
+          {!boundD4&&<><label>更正当前任务建议<select aria-label="更正当前任务建议" value={correctionId} disabled={pending || retry !== null} onChange={e=>setCorrectionId(e.target.value)}>
             <option value="">请选择当前任务待审建议</option>{corrections.map(item=><option key={item.proposal_id} value={item.proposal_id}>{item.proposal_id}</option>)}
           </select></label>
           <Button disabled={pending || retry !== null || correctionPage<=1} onClick={()=>setCorrectionPage(p=>p-1)}>上一页待更正建议</Button>
           <Button disabled={pending || retry !== null || correctionPage*20>=correctionTotal} onClick={()=>setCorrectionPage(p=>p+1)}>下一页待更正建议</Button>
           <Button disabled={pending || retry !== null || !corrections.some(item=>item.proposal_id===correctionId) || ['completed','failed','cancelled'].includes(page?.task_status ?? '')} onClick={()=>send(JSON.stringify({intent:'replace_d5',predecessor_id:correctionId}))}>明确更正选中建议</Button>
-          <p>更正意图只指定前版；并列备选保留原建议。自由聊天含未界定资料时不能保存共享建议。</p>
+          <p>更正意图只指定前版；并列备选保留原建议。自由聊天含未界定资料时不能保存共享建议。</p></>}
           {workflow?.question && <p>{workflow.question}</p>}
           {workflow?.status && <p>模型状态：{workflow.status}</p>}
-          <label>选择处理范围检查点<select aria-label="选择处理范围检查点" value={selectedCheckpoint?.checkpoint_id??''} onChange={e=>setSelectedCheckpoint(checkpoints.find(cp=>cp.checkpoint_id===e.target.value)??null)}>
+          {!boundD4&&<><label>选择处理范围检查点<select aria-label="选择处理范围检查点" value={selectedCheckpoint?.checkpoint_id??''} onChange={e=>setSelectedCheckpoint(checkpoints.find(cp=>cp.checkpoint_id===e.target.value)??null)}>
             <option value="">请选择实际任务检查点</option>
             {selectedCheckpoint && !checkpoints.some(cp=>cp.checkpoint_id===selectedCheckpoint.checkpoint_id) && <option value={selectedCheckpoint.checkpoint_id}>{selectedCheckpoint.created_at} · {selectedCheckpoint.checkpoint_id}</option>}
             {checkpoints.map(cp=><option key={cp.checkpoint_id} value={cp.checkpoint_id}>{cp.created_at} · {cp.checkpoint_id}</option>)}
@@ -347,7 +411,9 @@ export default function AgentSidebar() {
           <Button disabled={checkpointPage<=1} onClick={()=>setCheckpointPage(p=>p-1)}>上一页检查点</Button>
           <Button disabled={checkpointPage*20>=checkpointTotal} onClick={()=>setCheckpointPage(p=>p+1)}>下一页检查点</Button>
           {selectedCheckpoint && <D5ProposalPanel capaId={ctx.selectedTask.target_capa_id} checkpoint={{taskId:ctx.selectedTask.task_id,checkpointId:selectedCheckpoint.checkpoint_id}} />}
-          <Button disabled={pending || retry !== null || ['completed','failed','cancelled'].includes(page?.task_status ?? '')} onClick={() => send(JSON.stringify({intent:'continue_d5',additional_context:'none'}))}>继续（无额外资料）</Button>
+          </>}
+          {boundD4&&<><p>当前任务：D4 根因分析。新增事实请先维护 D2/D3/FMEA，再重新捕获。</p><D4CandidatePanel capaId={ctx.selectedTask.target_capa_id}/></>}
+          <Button disabled={pending || retry !== null || ['completed','failed','cancelled'].includes(page?.task_status ?? '')} onClick={() => send(JSON.stringify({intent:boundD4?'continue_d4':'continue_d5',additional_context:'none'}))}>继续（无额外资料）</Button>
         </section>}
 
         {activity.status === "interrupted" && <p>连接中断，重试中</p>}
@@ -362,7 +428,7 @@ export default function AgentSidebar() {
             open={ctx.open}
             requestEpoch={ctx.requestEpoch}
           />
-          <label>追加指令<textarea
+          {!boundD4&&<><label>追加指令<textarea
             aria-label="追加指令"
             maxLength={10000}
             value={text}
@@ -372,7 +438,7 @@ export default function AgentSidebar() {
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !["completed", "failed", "cancelled"].includes(page.task_status)) { e.preventDefault(); send(text); }
             }} />
           </label>
-          <Button disabled={pending || retry !== null || !text.trim() || ["completed", "failed", "cancelled"].includes(page.task_status)} onClick={() => void execute({ kind: "message", taskId: ctx.selectedTask!.task_id, body: { content: text, idempotency_key: crypto.randomUUID() } })}>{boundModel ? `补充给 ${boundModel.name}` : "发送指令"}</Button>
+          <Button disabled={pending || retry !== null || !text.trim() || ["completed", "failed", "cancelled"].includes(page.task_status)} onClick={() => void execute({ kind: "message", taskId: ctx.selectedTask!.task_id, body: { content: text, idempotency_key: crypto.randomUUID() } })}>{boundModel ? `补充给 ${boundModel.name}` : "发送指令"}</Button></>}
         </>}
       </>}
       {retry && <Button disabled={pending} onClick={() => void execute(retry)}>{retry.kind === "message" ? "重试发送原指令" : retry.kind === "control" ? "重试原控制操作" : "重试创建原任务"}</Button>}

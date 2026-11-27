@@ -17,6 +17,18 @@ from app.services.recommendation_sources import HistoricalCAPASource, Historical
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
 
 
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa:F401,E402
+
+
+async def _audit_report(db,factory,user):
+    """A genuine current report; audit tests must not use a nonexistent UUID."""
+    from app.models.capa import CAPAEightD
+    report=CAPAEightD(report_id=uuid.uuid4(),document_no='PIPE-AUDIT-'+uuid.uuid4().hex[:8],title='pipeline audit fixture',
+        factory_id=factory.id,product_line_code='DC-DC-100',created_by=user.user_id,status='D4_ROOT_CAUSE',d2_description='x')
+    db.add(report);await db.flush()
+    return report.report_id
+
+
 def _recommend_kwargs(user_id=None, report_id=None, factory_id=None):
     return {
         "user": User(user_id=user_id or uuid.uuid4(), username="u", password_hash="h"),
@@ -59,7 +71,7 @@ async def test_pipeline_writes_success_audit(db, default_factory, admin_user, mo
         return LLMOutcome(candidates=two, attempted=2, succeeded=2, failed=0)
     monkeypatch.setattr(pipeline.orchestrator.llm_layer, "enrich", _enrich)
 
-    report_id = uuid.uuid4()
+    report_id = await _audit_report(db,default_factory,admin_user)
     await pipeline.recommend(
         _ctx("d4"), user=admin_user, report_id=report_id,
         factory_id=default_factory.id, tenant_schema="public",
@@ -96,7 +108,7 @@ async def test_pipeline_writes_partial_audit(db, default_factory, admin_user, mo
         return LLMOutcome(candidates=two, attempted=2, succeeded=1, failed=1)
     monkeypatch.setattr(pipeline.orchestrator.llm_layer, "enrich", _enrich)
 
-    report_id = uuid.uuid4()
+    report_id = await _audit_report(db,default_factory,admin_user)
     await pipeline.recommend(
         _ctx("d4"), user=admin_user, report_id=report_id,
         factory_id=default_factory.id, tenant_schema="public",
@@ -125,7 +137,7 @@ async def test_pipeline_writes_llm_failed_audit(db, default_factory, admin_user,
         return LLMOutcome(candidates=[], attempted=2, succeeded=0, failed=2)
     monkeypatch.setattr(pipeline.orchestrator.llm_layer, "enrich", _enrich)
 
-    report_id = uuid.uuid4()
+    report_id = await _audit_report(db,default_factory,admin_user)
     await pipeline.recommend(
         _ctx("d4"), user=admin_user, report_id=report_id,
         factory_id=default_factory.id, tenant_schema="public",
@@ -152,7 +164,7 @@ async def test_pipeline_no_audit_when_pc_none(db, default_factory, admin_user, m
 
     pipeline = HybridRecommendationPipeline(db=db, pc=None, embedding_provider=_NoEmbed())
     pipeline._cache_capa_result = AsyncMock()
-    report_id = uuid.uuid4()
+    report_id = await _audit_report(db,default_factory,admin_user)
     await pipeline.recommend(
         _ctx("d4"), user=admin_user, report_id=report_id,
         factory_id=default_factory.id, tenant_schema="public",

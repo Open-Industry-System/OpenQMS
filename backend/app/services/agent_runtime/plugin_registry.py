@@ -48,6 +48,13 @@ async def register_plugin(db: AsyncSession, actor: User, key: str, version: str,
                           manifest: dict) -> tuple[AgentPluginInstallation, str]:
     await _require_current_admin(db, actor)
     registration = PluginRegister(plugin_key=key, plugin_version=version, manifest=manifest)
+    from app.services.agent_runtime.pfmea_impact_tasks import R7_PLUGIN_KEY
+    if registration.plugin_key == R7_PLUGIN_KEY:
+        from app.services.agent_runtime.pfmea_impact_activation import require_manifest
+        require_manifest(registration.manifest)
+    if registration.plugin_key == "openqms.controlled-iqc-investigation":
+        from app.services.agent_runtime.iqc_investigation_pilot import require_manifest as require_iqc_manifest
+        require_iqc_manifest(registration.manifest)
     # begin_nested() flushes pending caller state before creating its savepoint.
     # Keep unrelated write failures outside plugin conflict translation.
     await db.flush()
@@ -175,6 +182,23 @@ async def set_plugin_enabled(db: AsyncSession, actor: User, installation_id: UUI
     await _require_current_admin(db, actor)  # Admission may have changed while waiting for the lock.
     if type(enabled) is not bool:
         raise ValueError("enabled must be boolean")
+    from app.services.agent_runtime.pfmea_impact_tasks import R7_PLUGIN_KEY
+    if plugin.plugin_key == R7_PLUGIN_KEY:
+        if enabled:
+            from app.services.agent_runtime.pfmea_impact_activation import require_pinned_installation
+            await require_pinned_installation(db, plugin, enabling=True)
+        else:
+            from app.services.agent_runtime.pfmea_impact_runtime import drain_installation
+            await drain_installation(db, plugin, actor.user_id)
+        await _require_current_admin(db, actor)
+    if plugin.plugin_key == "openqms.controlled-iqc-investigation":
+        if enabled:
+            from app.services.agent_runtime.iqc_investigation_pilot import require_pinned_installation
+            await require_pinned_installation(db, plugin, enabling=True)
+        else:
+            from app.services.agent_runtime.iqc_investigation_runtime import drain_installation
+            await drain_installation(db, plugin, actor.user_id)
+        await _require_current_admin(db, actor)
     plugin.enabled = enabled
     _audit(db, actor, plugin, "SET_PLUGIN_ENABLED")
     await db.flush()
@@ -183,13 +207,27 @@ async def set_plugin_enabled(db: AsyncSession, actor: User, installation_id: UUI
 
 async def _require_grant_enableable(db, plugin, grant, actor=None) -> None:
     from app.services.agent_runtime import model_egress
+    from app.services.agent_runtime.pfmea_impact_activation import GRANT_MATRIX, require_grant_enrollment
+    from app.services.agent_runtime.pfmea_impact_tasks import R7_PLUGIN_KEY
+    if plugin.plugin_key == R7_PLUGIN_KEY:
+        await require_grant_enrollment(db, plugin, grant, actor)
+        return
+    if plugin.plugin_key == "openqms.controlled-iqc-investigation":
+        from app.services.agent_runtime.iqc_investigation_pilot import require_grant_enrollment as require_iqc_grant
+        await require_iqc_grant(db, plugin, grant, actor)
+        return
+    from app.services.agent_runtime.iqc_investigation_pilot import IQC_CAPABILITIES
+    if grant.capability_id in IQC_CAPABILITIES:
+        raise ValueError("Capability cannot be enabled")
+    if grant.capability_id in GRANT_MATRIX:
+        raise ValueError("Capability cannot be enabled")
     if plugin.plugin_key == model_egress.R5_PLUGIN_KEY:
         from app.services.agent_runtime.r5_executor import ControlledPilot
         pilot = db.info.get('r5_controlled_pilot')
         if not isinstance(pilot, ControlledPilot):
             raise ValueError('Capability cannot be enabled')
         pilot.verify(db.info.get('tenant_binding'), plugin)
-        spec = get_capability(grant.capability_id, profile=model_egress.R5_PROFILE)
+        spec = get_capability(grant.capability_id, profile=pilot.profile)
         if (spec is None or not grant.object_ids or len(grant.object_ids) != 1
                 or not grant.factory_ids or not grant.product_line_codes
                 or grant.expires_at is None or grant.expires_at <= datetime.now(UTC)
@@ -297,8 +335,11 @@ async def create_plugin_grant(db: AsyncSession, actor: User, installation_id: UU
     plugin = await _plugin(db, installation_id, lock=True)
     await _require_current_admin(db, actor)
     declared = None
+    if request.capability_id == 'capa.d4.fmea_input.masked.v1':
+        from app.services.agent_runtime.derived_source_grants import validate_d4_input_source
+        validate_explicit_source = validate_d4_input_source
     if request.derived_source_scope is not None:
-        if request.capability_id != TEXT_CAPABILITY:
+        if request.capability_id not in {TEXT_CAPABILITY, 'capa.d4.fmea_input.masked.v1'}:
             raise ValueError('Source scope unsupported')
         actor_scope = SimpleNamespace(user=actor)
         _, factories, lines = await _current_access(db, actor_scope)
@@ -308,7 +349,7 @@ async def create_plugin_grant(db: AsyncSession, actor: User, installation_id: UU
                 or request.product_line_codes is None or target.product_line_code not in request.product_line_codes):
             raise ValueError('Source scope does not match grant')
         declared = await validate_explicit_source(db, actor_scope, target, request.derived_source_scope)
-    elif request.capability_id == TEXT_CAPABILITY and request.enabled:
+    elif request.capability_id in {TEXT_CAPABILITY, 'capa.d4.fmea_input.masked.v1'} and request.enabled:
         raise ValueError('Source scope required')
     if request.enabled:
         await _require_grant_enableable(db, plugin, request, actor)

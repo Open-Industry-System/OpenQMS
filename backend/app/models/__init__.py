@@ -13,6 +13,9 @@ from app.models.agent import (
     AgentToolCall,
 )
 from app.models.agent_plugin import AgentPluginGrant, AgentPluginInstallation
+from app.models.agent_pfmea_impact import (
+    AgentPfmeaImpactBinding, AgentPfmeaImpactReceipt, AgentPfmeaImpactResultReceipt,
+)
 from app.models.agent_runtime_event import (
     AgentEventReceipt, AgentProjectionReceipt, AgentResult, AgentResultReceipt, AgentRunEvent,
 )
@@ -20,6 +23,7 @@ from app.models.agent_readonly_control import (
     AgentCheckpointReceipt, AgentReadonlyCheckpoint, AgentTaskControl, AgentTaskUpdate,
 )
 from app.models.agent_task import AgentTask, AgentRun, AgentTaskGrant, AgentTaskMessage
+from app.models.agent_iqc_investigation import IqcInvestigationBinding, IqcInvestigationReceipt
 from app.models.agent_task_attachment import AgentTaskAttachment
 from app.models.agent_review_skill import AgentReviewSkill
 from app.models.agent_read_task import AgentReadTask
@@ -160,11 +164,13 @@ __all__ = [
     "CapaD3AdviceGeneration", "CapaD3AiAdvice", "CapaD3AdviceAdoption",
     "CapaD3Execution", "CapaDocgAnalysis", "CapaDocgAudit", "CapaDocgDecision",
     "CapaLateralDiffusionCheck", "CapaLateralNotification",
+    "IqcInvestigationBinding", "IqcInvestigationReceipt",
     "AgentTask", "AgentRun", "AgentTaskGrant", "AgentTaskMessage", "AgentTaskAttachment",
     "AgentCheckpointReceipt", "AgentReadonlyCheckpoint", "AgentTaskControl", "AgentTaskUpdate",
     "AgentEventReceipt", "AgentProjectionReceipt", "AgentResult", "AgentResultReceipt", "AgentRunEvent",
     "AgentAction", "AgentCommitWhitelist", "AgentMemory", "AgentMessage", "AgentPluginGrant", "AgentPluginInstallation", "AgentSession", "AgentToolCall",
     "AgentReadTask", "CapaD4RootCauseRevision", "CapaD4RootCauseSourceProof",
+    "AgentPfmeaImpactBinding", "AgentPfmeaImpactReceipt", "AgentPfmeaImpactResultReceipt",
     "AgentRestrictedProjectionReceipt", "AgentPluginDerivedSourceScope",
     "AgentTaskDerivedSourceScope", "AgentTaskSourceRequest",
     "ControlPlan", "ControlPlanItem", "QualityGoal",
@@ -256,3 +262,10 @@ from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5ProposalSource, Ca
 from app.models.agent_d5_basis import AgentD5BasisReceipt, AgentD5CommandBasis
 
 from app.models.agent_model_deployment import AgentModelDeployment, AgentTaskModelBinding
+
+from app.models.capa_r6 import (
+    CapaR6MaterialVersion, CapaR6EntrySwitch, CapaR6ReportSnapshot, CapaR6SourceOrigin,
+    AgentD4CandidateCommand, AgentD4CandidateCheckpointPosition, CapaD4Candidate,
+    CapaD4CandidateSource, CapaR6RootRevisionBody, CapaR6RootRevisionSource,
+    CapaD5MeasureRevision, CapaR6StaffReceipt, CapaR6RootDeliveryBinding,
+)

@@ -3,6 +3,10 @@ from . import _codec
 from ._deadline import Deadline
 from ._transport import Transport
 from .errors import ClientClosed, HTTPError, ResponseTooLarge, SDKError, UnknownOutcome
+from .models import (
+    PfmeaImpactAnalysis, PfmeaImpactAssessment, PfmeaImpactConfirmation,
+    PfmeaImpactRelease, PfmeaImpactResultRef,
+)
 
 
 _DEFINITE_REJECTIONS = frozenset({400, 401, 403, 404, 409, 410, 422})
@@ -85,6 +89,32 @@ class RunClient:
         self._claim = envelope.claim
         self._token = envelope.token
         self._state = 'open'
+        self._owns_parent = False
+
+    @classmethod
+    def from_launch(cls, launch):
+        from .models import ManagedLaunch, RunClaim, ClientConfig
+        from .errors import ConfigError
+        if type(launch) is not ManagedLaunch:
+            raise ConfigError('config',kind='invalid_type')
+        launch.__post_init__()
+        config=ClientConfig(launch.api_origin,tenant_slug=launch.tenant_slug,timeout=30)
+        owner=_ManagedOwner(config,launch)
+        run=cls.__new__(cls)
+        run._parent=owner
+        run._claim=RunClaim(launch.run_id,launch.task_id,launch.lease_epoch,launch.lease_expires_at,
+            launch.accepted_message_seq,launch.has_resume_checkpoint)
+        run._token=launch.token
+        run._state='open'
+        run._owns_parent=True
+        return run
+
+    def __enter__(self):
+        if self._state!='open': raise ClientClosed('close',kind='client_closed')
+        return self
+
+    def __exit__(self,*args):
+        self.close()
 
     @property
     def claim(self):
@@ -127,6 +157,64 @@ class RunClient:
     def message_history(self, *, after_sequence=0, limit=20):
         return self._call('message_history', dict(after_sequence=after_sequence, limit=limit))
 
+    def model_turn(self, *, turn=0):
+        return self._call('model_turn',dict(turn=turn))
+
+    def model_tool(self, *, call_id):
+        return self._call('model_tool',dict(call_id=call_id))
+
+    def save_d4_checkpoint(self):
+        return self._call('save_d4_checkpoint',{})
+
+    def save_d4_candidate(self, *, command_key, text, supporting=(), opposing=(),
+                          missing_information=(), operation='save', predecessor_id=None,
+                          correction_message_id=None):
+        return self._call('save_d4_candidate', dict(command_key=command_key, text=text,
+            supporting=supporting, opposing=opposing, missing_information=missing_information,
+            operation=operation, predecessor_id=predecessor_id, correction_message_id=correction_message_id))
+
+    def _call_pfmea(self, operation, parameters, **context):
+        return self._call(operation, parameters, lease_epoch=self._claim.lease_epoch, **context)
+
+    def pfmea_impact_material(self) -> PfmeaImpactRelease:
+        """Read the current run's approved CAPA assessment material."""
+        return self._call_pfmea('pfmea_impact_material', {})
+
+    def pfmea_impact_search(
+        self, *, term: str, snapshot_digest: str, cursor: str | None = None,
+    ) -> PfmeaImpactRelease:
+        """Search only the run's fixed target. Cursors are supplied by the server."""
+        from ._pfmea import expected_snapshot
+        operation = 'pfmea_impact_search'
+        return self._call_pfmea(operation, dict(term=term, cursor=cursor),
+                                snapshot_digest=expected_snapshot(operation, snapshot_digest))
+
+    def pfmea_impact_page(
+        self, *, scope_ref: str, snapshot_digest: str, cursor: str | None = None,
+    ) -> PfmeaImpactRelease:
+        """Fetch and verify a page; verification does not acknowledge receipt."""
+        from ._pfmea import expected_snapshot
+        operation = 'pfmea_impact_page'
+        return self._call_pfmea(operation, dict(scope_ref=scope_ref, cursor=cursor),
+                                scope_ref=scope_ref, snapshot_digest=expected_snapshot(operation, snapshot_digest))
+
+    def pfmea_impact_confirm(self, page: PfmeaImpactRelease) -> PfmeaImpactConfirmation:
+        """Explicitly acknowledge the verified bytes of a canonical page."""
+        from ._pfmea import confirmation_parameters
+        operation = 'pfmea_impact_confirm'
+        if self._parent._closed or self._state != 'open':
+            raise ClientClosed(operation, kind='client_closed')
+        return self._call_pfmea(operation, confirmation_parameters(page, self._claim))
+
+    def pfmea_impact_submit(
+        self, *, operation_key: str, analyses: tuple[PfmeaImpactAnalysis, ...],
+        assessments: tuple[PfmeaImpactAssessment, ...],
+    ) -> PfmeaImpactResultRef:
+        """Submit a bounded proposal; retain the same key on explicit replay."""
+        return self._call_pfmea('pfmea_impact_result', dict(
+            operation_key=operation_key, analyses=analyses, assessments=assessments,
+        ))
+
     def finish(self, *, status):
         result = self._call('finish', dict(status=status), finish_status=status)
         self._state = 'closed_successfully'
@@ -136,3 +224,17 @@ class RunClient:
     def close(self):
         self._state = 'closed'
         self._token = None
+        if self._owns_parent:
+            self._parent.close()
+
+
+class _ManagedOwner:
+    def __init__(self,config,launch):
+        self._config=config
+        self._transport=Transport(config,launch=launch)
+        self._closed=False
+
+    def close(self):
+        if not self._closed:
+            self._closed=True
+            self._transport.close()

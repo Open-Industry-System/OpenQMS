@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from app.models.capa import CAPAEightD, CapaAIAdoption
 from app.schemas.capa_verification import AdoptRequest
-from app.services.capa_verification_service import adopt_recommendation
+from tests.capa.legacy_capture_support import adopt_rule_candidate as adopt_recommendation
 
 pytestmark = pytest.mark.requires_db
 
@@ -24,8 +24,8 @@ async def _make_capa(db, factory_id, user_id, doc_no="8D-STAGE-001", d4=None):
 async def test_adopt_recommendation_persists_stage_index(db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, d4=None)
     req = AdoptRequest(
-        d_step="d4", adopted_text="根因-阶段2", source="fmea_graph",
-        stage_index=2, item_ref={"failure_cause_node_id": "c1"},
+        d_step="d4", adopted_text="根因-阶段2", source="rule",
+        stage_index=2, item_ref={"entry_id": "rule-c1"},
     )
     adoption, new_value = await adopt_recommendation(db, capa, req, admin_user)
     assert new_value == "根因-阶段2"

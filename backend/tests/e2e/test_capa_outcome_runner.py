@@ -538,3 +538,32 @@ def test_layer_removes_sdk_endpoint_overrides_and_preserves_official_defaults(la
 
     with patch.dict(os.environ, environment, clear=True):
         asyncio.run(check_clients())
+
+
+@pytest.mark.parametrize("variant", ("exact", "missing", "duplicate", "skipped"))
+def test_native_junit_requires_registered_r7_process_nodes(tmp_path, variant):
+    from xml.etree import ElementTree as ET
+
+    from tests.ci.r5_required import R5_REQUIRED
+    from tests.e2e.capa_outcome_runner import _require_r5_success
+
+    layer = "r5-api"
+    classname = "tests.e2e.test_r7_pfmea_impact_process"
+    names = R5_REQUIRED[layer][classname]
+    target = classname.replace(".", "/") + ".py"
+    suite = ET.Element("testsuite")
+    for name in (names[1:] if variant == "missing" else names):
+        entry = ET.SubElement(suite, "testcase", classname=classname, name=name)
+        if name == names[0]:
+            if variant == "skipped":
+                ET.SubElement(entry, "skipped")
+            if variant == "duplicate":
+                ET.SubElement(suite, "testcase", classname=classname, name=name)
+    junit = tmp_path / "native.xml"
+    ET.ElementTree(suite).write(junit)
+
+    if variant == "exact":
+        _require_r5_success(junit, {"xpassed": 0}, layer, [target])
+    else:
+        with pytest.raises(ValueError, match="mandatory R5 nodes"):
+            _require_r5_success(junit, {"xpassed": 0}, layer, [target])

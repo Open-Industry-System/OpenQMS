@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     AGENT_TASK_ATTACHMENT_SCAN_TIMEOUT_SECONDS: int = Field(default=60, ge=1, le=60)
     AGENT_R5_CONTROLLED_ENABLED: bool = False
     AGENT_R5_CONTROLLED_POLICY_FILE: str | None = None
+    AGENT_R7_PFMEA_IMPACT_ENABLED: bool = False
+    AGENT_R7_PFMEA_IMPACT_POLICY_FILE: str | None = None
+    AGENT_R7_IQC_INVESTIGATION_ENABLED: bool = False
+    AGENT_R7_IQC_INVESTIGATION_POLICY_FILE: str | None = None
     AGENT_D4_TEXT_LOCAL_TRIAL_ENABLED: bool = False
     AGENT_D4_TEXT_LOCAL_TRIAL_POLICY_FILE: str | None = None
     AGENT_LOCAL_TRIAL_MODE: str = "disabled"
@@ -45,6 +49,7 @@ class Settings(BaseSettings):
     LLM_MODEL: str = ""          # 各 provider 有内部默认值
     LLM_BASE_URL: str = ""       # 仅 local 模式
     LLM_TIMEOUT: int = 5         # 超时秒数
+    R6_GENERATION_ENABLED: bool = True
     CAPA_DRAFT_LLM_TIMEOUT: int = Field(default=15, ge=1, le=60)  # CAPA 8D AI 起草超时
     REPORT_LLM_TIMEOUT: int = Field(default=10, ge=1, le=120)  # 管理评审报告 AI 生成超时
 

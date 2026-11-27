@@ -13,6 +13,17 @@ class AgentTask(Base):
     __tablename__ = "agent_tasks"
     __table_args__ = (
         sa.ForeignKeyConstraint(["target_capa_id", "factory_id"], ["capa_eightd.report_id", "capa_eightd.factory_id"], name="fk_agent_task_capa_factory"),
+        sa.ForeignKeyConstraint(
+            ["target_iqc_inspection_id", "factory_id"],
+            ["iqc_inspections.inspection_id", "iqc_inspections.factory_id"],
+            name="fk_agent_task_iqc_factory",
+        ),
+        sa.CheckConstraint(
+            "(task_type = 'capa' AND target_capa_id IS NOT NULL AND target_iqc_inspection_id IS NULL)"
+            " OR (task_type = 'iqc_investigation_advice.v1' AND target_capa_id IS NULL"
+            " AND target_iqc_inspection_id IS NOT NULL)",
+            name="ck_agent_task_typed_anchor",
+        ),
         sa.UniqueConstraint("initiator_id", "request_key", name="uq_agent_task_initiator_request"),
         sa.CheckConstraint("status IN ('blocked_capability','ready','paused','completed','failed','cancelled')", name="ck_agent_task_status"),
     )
@@ -20,7 +31,9 @@ class AgentTask(Base):
     initiator_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False)
     executor_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), sa.ForeignKey("users.user_id"), nullable=False)
     preferred_installation_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), sa.ForeignKey("agent_plugin_installations.installation_id"), nullable=False)
-    target_capa_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    task_type: Mapped[str] = mapped_column(sa.String(40), nullable=False, server_default="capa")
+    target_capa_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    target_iqc_inspection_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     factory_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     request_key: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)

@@ -4,11 +4,17 @@ description: Use when asked to verify / walk through / 验收 the OpenQMS CAPA 8
 ---
 
 > 依据：docs/user-stories/US-E2E-01-capa-8d-closed-loop/US-E2E-01.8-knowledge-sink.md
-> 故事版本：定稿 v2（2026-10-27）
-> 所属 epic：US-E2E-01（README.md v8.1）
+> 故事版本：v3（2026-11-17，R6 契约同步）
+> 所属 epic：US-E2E-01（README.md v8.2）
 > 同步规则：当子故事版本号或日期变更，本剧本必须重新核对并同步。
 
 # verify-capa-8d-knowledge-sink
+
+## R6 分支（2026-11-17，同步 US-E2E-01.8 v3）
+
+先读取当前报告 entry phase 与完整来源资格。legacy 才执行下文原场景；draining 不恢复旧写入口；switched 按 `docs/user-stories/US-E2E-01-capa-8d-closed-loop/R6-verify.md` 的本子故事分支执行。R6 受限材料的经验提取和知识沉淀在审批前均明确 NOT_EXECUTED，不创建知识正文、向量或排队沉淀。结案不自动授权知识外发。原故事的自动提取与知识库成功只适用于单独满足来源/出口准入的场景，不作为 R6 本地闭环签收条件。
+
+使用新建登记的隔离测试资源；禁止 reseed、重开、改写或重新导出保留的 C9/C10 报告。记录源码指纹、实际命令和证据来源，UI 截图/受控假模型/真实模型/复用历史证据分别记账；静态脚本检查不能标 UI PASS。
 
 ## Overview
 

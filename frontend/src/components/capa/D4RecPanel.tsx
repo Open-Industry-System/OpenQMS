@@ -140,7 +140,8 @@ export default function D4RecPanel({ capaId, canAdopt = true, beforeAdopt, onAdo
                         if (!request.current()) return;
                         await adoptRecommendation(capaId, {
                           d_step: "d4",
-                          adopted_text: item.failure_cause_name,
+                          capture_id: item.capture_id,
+                  adopted_text: item.failure_cause_name,
                           source: item.match_source,
                           stage_index: item.stage_index,
                           item_ref: {

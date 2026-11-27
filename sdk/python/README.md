@@ -164,3 +164,31 @@ results, checkpoints or finish, execute messages, call models, grant a profile,
 retry failures or resolve an unknown finish. Full ten-operation fixture HTTP
 compatibility is tested separately, not by silently expanding this example into
 an official worker. No real QMS server is started by these developer gates.
+
+
+### R7 PFMEA impact runtime
+
+A platform launch for an impact assessment pairs protocol `r7.pfmea.launch.v1`
+with profile `model_pfmea_impact_v1`. Open it with `RunClient.from_launch`.
+The server authorizes the bearer credential and the fixed CAPA report
+and PFMEA snapshot on each operation.
+
+- `pfmea_impact_material()` returns the run's authorized formal input and
+  `snapshot_digest`. Keep that digest when calling `pfmea_impact_search` or
+  `pfmea_impact_page`.
+- `pfmea_impact_search(term=..., snapshot_digest=..., cursor=...)` searches
+  only the bound PFMEA. Use the returned `next_cursor` to continue.
+- `pfmea_impact_page(scope_ref=..., snapshot_digest=..., cursor=...)` uses a
+  server-issued scope reference. The SDK verifies the exact decoded bytes,
+  snapshot, scope, page key and run binding before returning the page.
+- `pfmea_impact_confirm(page)` explicitly acknowledges those verified bytes.
+  It does not run automatically or decide whether a finding has enough
+  evidence. A `coverage_id` is returned only after the server confirms
+  complete coverage for that scope.
+- `pfmea_impact_submit(operation_key=..., analyses=..., assessments=...)` submits
+  typed `PfmeaImpactAnalysis` and `PfmeaImpactAssessment` records. Keep the same
+  operation key and content if explicitly replaying a submission whose
+  response was lost. The SDK does not retry submissions.
+
+Release envelopes and confirmation tokens are not written to SDK diagnostics.
+These methods do not modify CAPA measures or PFMEA nodes.

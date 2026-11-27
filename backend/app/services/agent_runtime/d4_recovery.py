@@ -26,12 +26,14 @@ def _generation(db):
 
 async def recovery_grant(db, task, run):
     """Classify an existing text task without using current plugin authority."""
+    from app.services.capa_d4_candidates import is_d4_task, FMEA_CAPABILITY
+    capability = FMEA_CAPABILITY if await is_d4_task(db, task) else TEXT_CAPABILITY
     with db.no_autoflush:
         request = await db.scalar(select(AgentTaskSourceRequest).where(
             AgentTaskSourceRequest.task_id == task.task_id).execution_options(populate_existing=True))
         grants = list((await db.scalars(select(AgentTaskGrant).where(
             AgentTaskGrant.task_id == task.task_id,
-            AgentTaskGrant.capability_id == TEXT_CAPABILITY).limit(2).execution_options(populate_existing=True))).all())
+            AgentTaskGrant.capability_id == capability).limit(2).execution_options(populate_existing=True))).all())
     if (request is None or request.fingerprint_format != 'd4-source-request.v1'
             or len(grants) != 1 or run is None or run.task_id != task.task_id
             or run.installation_id != task.preferred_installation_id):
@@ -94,7 +96,7 @@ def _view(row):
 
 async def _owned(db, scope, task_id):
     try:
-        return await task_service.get_task_for_view(db, scope, task_id)
+        return await task_service.get_task_for_control(db, scope, task_id)
     except LookupError:
         raise PermissionError('Recovery unavailable') from None
 
@@ -108,7 +110,7 @@ async def _fresh_authority(db, scope, task_id, task_binding, run_binding):
 
 async def create_checkpoint(db, scope, task_id, run_id, expected_epoch):
     from app.services.agent_runtime import model_egress, r5_recovery
-    candidate = await task_service.get_task_for_view(db, scope, task_id)
+    candidate = await task_service.get_task_for_control(db, scope, task_id)
     if await model_egress.is_r5_task(db, candidate):
         return await r5_recovery.create_paused_checkpoint(db, scope, task_id, run_id, expected_epoch)
     task = await _owned(db, scope, task_id)

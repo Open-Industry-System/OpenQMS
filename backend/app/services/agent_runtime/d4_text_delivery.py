@@ -95,6 +95,8 @@ def _digest(domain: str, payload) -> str:
 
 async def load_current_source_state(db: AsyncSession, *, report_id: UUID) -> SourceState:
     """Only scalar coordinates and proof metadata, without source or text bodies."""
+    from app.services.capa_d4_material import require_legacy_root_only
+    await require_legacy_root_only(db, report_id)
     binding = db.info.get('tenant_binding')
     if not isinstance(binding, TenantBinding) or binding.mode != 'business' or settings.TENANT_MODE != 'dev':
         raise SourceUnavailable()

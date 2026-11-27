@@ -314,5 +314,9 @@ async def test_runtime_rejects_old_text_token_after_policy_binding_changes(monke
     monkeypatch.setattr(run_auth, 'verify_run_token', AsyncMock(return_value=run))
     monkeypatch.setattr(runtime_access, 'authorize_task', AsyncMock(return_value=runtime_access.TaskAuthority(None, (), 'line', replacement)))
     db = SimpleNamespace(no_autoflush=nullcontext(), scalar=AsyncMock(side_effect=[task, installation]))
+    history=AsyncMock(side_effect=AssertionError('stale token must not authorize private history'))
+    monkeypatch.setattr('app.services.capa_d4_candidates.authorize_task_history',history)
     with pytest.raises(PermissionError, match='Invalid run credential'):
         await runtime_access.verify_runtime_identity(db, token, None)
+
+    history.assert_not_awaited()

@@ -25,3 +25,7 @@ async def test_blocked_skips_audit_and_cache(monkeypatch):
     assert result.blocked is True
     pipe._maybe_write_llm_audit.assert_not_awaited()
     pipe._cache_capa_result.assert_not_awaited()
+
+
+# Isolate prompt/orchestration units; real DB sessions still use current authority.
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa: F401,E402

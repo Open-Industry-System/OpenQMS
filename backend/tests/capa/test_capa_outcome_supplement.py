@@ -10,7 +10,7 @@ from app.models.audit import AuditLog
 from app.models.capa import CAPAEightD
 from app.models.capa_lesson import CapaLessonLearned
 from app.services.capa_service import update_capa
-from tests.capa.test_capa_outcome_decision import decision_provider, expectation, bind_decision_sources
+from tests.capa.test_capa_outcome_decision import decision_provider, expectation
 from tests.capa.test_capa_outcome_review import read
 
 pytestmark = pytest.mark.requires_db
@@ -26,7 +26,15 @@ async def test_supplement_never_rebinds_approval(
         await _extract_lessons(db, await review_case.report(db), 'd7')
         await db.commit()
     if real_receipt:
-        await bind_decision_sources(review_case, review_sources)
+        # This derived-lessons contract exercises the ordinary unrestricted path.
+        # Restricted local propagation is explicitly not executed (covered separately).
+        from app.models.capa_doc_gate import CapaDocgAnalysis
+        from app.services.capa_doc_gate_service import _build_allowlist, _compute_input_hash
+        async with review_case.session_factory() as db:
+            capa = await review_case.report(db)
+            analysis = await db.get(CapaDocgAnalysis, review_case.owned_ids['analysis_id'])
+            analysis.analysis_input_hash = _compute_input_hash(capa, await _build_allowlist(db, capa))
+            await db.commit()
         seen = await expectation(review_case)
         approved = await review_http_client.post(f'/api/capa/{review_case.report_id}/advance',
             json={'target_state': 'D8_CLOSURE', **seen})

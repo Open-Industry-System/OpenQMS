@@ -139,7 +139,8 @@ async def test_preflight_reports_modify_target_absent_from_latest(db, capa_d8_ga
     kps = [{"target_kind": "cp_item", "expected_action": "modify",
             "field": "control_method", "target_key": "old-id"}]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert any(b["blocked_modify_target_key"] == "old-id" for b in breaks)
 
 
@@ -156,7 +157,8 @@ async def test_preflight_does_not_report_delete_target_absent(db, capa_d8_gate):
     kps = [{"target_kind": "cp_item", "expected_action": "delete",
             "field": "control_method", "target_key": "old-id"}]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert breaks == []
 
 
@@ -177,7 +179,8 @@ async def test_preflight_partial_shared_id_reports_only_blocked_modify(db, capa_
          "field": "control_method", "target_key": "B"},
     ]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert {b["blocked_modify_target_key"] for b in breaks} == {"B"}
 
 
@@ -196,7 +199,8 @@ async def test_preflight_skips_terminal_capa(db, capa_d8_gate):
     kps = [{"target_kind": "cp_item", "expected_action": "modify",
             "field": "control_method", "target_key": "old-id"}]
     await _make_analysis(db, capa, user.user_id, _affected(cp.cp_id, ver, kps), ver)
-    breaks = await scan_tenant_breaks(db, "public")
+    breaks = [row for row in await scan_tenant_breaks(db, "public")
+              if row["capa_id"] == str(capa.report_id)]
     assert breaks == []
 
 
@@ -415,6 +419,18 @@ async def test_preflight_rejects_waiver_replaced_after_validation(
                 "ALTER TABLE control_plan_versions "
                 "DISABLE TRIGGER trg_cp_version_no_update"
             ))
+            # This committed synthetic case now creates a monotonic R6 form
+            # counter through the normal gate writer. Remove only its counter
+            # during teardown; transactional DDL restores the guard on error.
+            await cleanup.execute(text(
+                "ALTER TABLE capa_r6_material_versions DISABLE TRIGGER r6_material_monotonic"
+            ))
+            await cleanup.execute(text(
+                "DELETE FROM capa_r6_material_versions WHERE report_id=:cid"
+            ), {"cid": capa_id})
+            await cleanup.execute(text(
+                "ALTER TABLE capa_r6_material_versions ENABLE TRIGGER r6_material_monotonic"
+            ))
             for statement in (
                 "DELETE FROM audit_logs WHERE factory_id=:fid",
                 "DELETE FROM capa_docg_decision WHERE analysis_id=:aid",
@@ -544,21 +560,23 @@ async def test_verify_fmea_version_accepts_legacy_compact_hash(db, capa_d8_gate)
     db.add(fmea)
     await db.flush()
     snap = {"nodes": [{"id": "n1"}], "edges": []}
+    compact = compute_snapshot_hash(snap)
+    # Load the historical representation before modern hash normalization and
+    # approval-scope capture. Preserve both immutability guards during the read.
+    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER trg_fmea_version_hash_verify"))
+    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER r7_impact_approval_generation"))
     ver = FMEAVersion(
         version_id=uuid.uuid4(), fmea_id=fmea.fmea_id, factory_id=capa.factory_id,
-        major_no=1, minor_no=0, snapshot=snap, sha256_hash="placeholder",
+        major_no=1, minor_no=0, snapshot=snap, sha256_hash=compact,
         change_type="approve", change_summary="legacy", created_by=user.user_id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(ver)
     await db.flush()
-    compact = compute_snapshot_hash(snap)
-    await db.execute(_text("ALTER TABLE fmea_versions DISABLE TRIGGER trg_fmea_version_no_update"))
-    await db.execute(_text(
-        "UPDATE fmea_versions SET sha256_hash=:h WHERE version_id=:vid"
-    ), {"h": compact, "vid": ver.version_id})
-    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER trg_fmea_version_no_update"))
+    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER trg_fmea_version_hash_verify"))
+    await db.execute(_text("ALTER TABLE fmea_versions ENABLE TRIGGER r7_impact_approval_generation"))
     await db.refresh(ver)
+    assert ver.r7_approved_scope_generation is None
     assert ver.sha256_hash == compact
     assert await verify_fmea_version(db, ver.version_id) is True
 

@@ -125,7 +125,8 @@ const taskFields = {
   created_at: date,
   updated_at: date
 };
-const modelDeployment = object({ deployment_id: uuid, name: str(), version: str() });
+const modelProfile=lit('model_d4_candidate_v1','model_d5_proposal_v1','model_d5_proposal_r6_v1');
+const modelDeployment = object({ deployment_id: uuid, name: str(), version: str(),profile:modelProfile });
 const task: Check = value => object({ ...taskFields, model_deployment: nullable(modelDeployment) })(value) || object(taskFields)(value);
 const controlOut = object({
   control_id: uuid,
@@ -208,7 +209,7 @@ export async function getTaskCheckpoint(taskId: string, checkpointId: string, si
 }
 
 export async function listModelDeployments(signal?: AbortSignal): Promise<{items: ModelChoice[]}> {
-  return parse((await client.get('/agent/models', {signal})).data, object({items:list(object({deployment_id:uuid,name:str(),version:str(),kind:lit('local','cloud')}),0,1000)}));
+  return parse((await client.get('/agent/models', {signal})).data, object({items:list(object({deployment_id:uuid,name:str(),version:str(),kind:lit('local','cloud'),profile:modelProfile}),0,1000)}));
 }
 export async function launchTask(taskId: string, signal?: AbortSignal): Promise<{task_id:string;status:string}> {
   const value = parse<{task_id:string;status:string}>((await client.post(`${base}/${taskId}/launch`, {}, {signal,timeout:130000})).data, object({task_id:uuid,status:str(100)}));

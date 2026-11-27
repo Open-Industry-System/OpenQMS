@@ -149,6 +149,156 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
     strict_tenant_search_path_sql(tenant_schema)
     verify_snapshot_checksum(manifest)
     reference = await _objects(connection, reference_schema)
+    if baseline_only or predecessor is not None:
+        iqc_fact_objects = {
+            ("function", "iqc_association_write_fence()"),
+            ("trigger", "iqc_inspections.iqc_association_write_fence"),
+            ("trigger", "supplier_scars.iqc_association_write_fence"),
+            ("trigger", "capa_eightd.iqc_association_write_fence"),
+            ("trigger", "agent_results.iqc_investigation_result_guard"),
+            ("function", "iqc_investigation_result_guard()"),
+            ("function", "iqc_investigation_ledger_guard()"),
+            ("column", "agent_tasks.task_type"),
+            ("column", "agent_tasks.target_iqc_inspection_id"),
+            ("constraint", "agent_tasks.ck_agent_task_typed_anchor"),
+            ("constraint", "agent_tasks.fk_agent_task_iqc_factory"),
+            ("column", "iqc_inspections.identity_generation"),
+            ("column", "iqc_inspections.inspection_revision"),
+            ("constraint", "iqc_inspections.uq_iqc_inspection_factory"),
+            ("index", "iqc_inspections.uq_iqc_inspection_factory"),
+            ("trigger", "iqc_inspections.iqc_fact_revision_guard"),
+            ("trigger", "iqc_inspection_items.iqc_item_fact_revision"),
+            ("trigger", "iqc_item_measurements.iqc_measurement_fact_revision"),
+            ("function", "iqc_fact_revision_guard()"),
+            ("function", "iqc_revise_from_detail()"),
+        }
+        anchor_column = ("column", "agent_tasks.target_capa_id")
+        if reference.get(anchor_column) == "uuid|false|||":
+            reference[anchor_column] = "uuid|true|||"
+        iqc_tables = {"agent_iqc_investigation_bindings", "agent_iqc_investigation_receipts"}
+        reference = {key: value for key, value in reference.items()
+                     if key not in iqc_fact_objects and key[1].split(".")[0] not in iqc_tables}
+    if predecessor == "tv025_r7_pfmea_impact":
+        predecessor = None
+    if baseline_only or predecessor is not None:
+        r7_tables = {
+            "agent_pfmea_impact_bindings", "agent_pfmea_impact_receipts",
+            "agent_pfmea_impact_result_receipts",
+        }
+        r7_objects = {
+            ("column", "fmea_documents.r7_scope_generation"),
+            ("column", "fmea_versions.r7_approved_scope_generation"),
+            ("trigger", "fmea_documents.r7_impact_target_generation"),
+            ("trigger", "fmea_versions.r7_impact_approval_generation"),
+            ("function", "r7_impact_ledger_guard()"),
+            ("trigger", "agent_results.r7_impact_result_guard"),
+            ("function", "r7_impact_result_guard()"),
+            ("function", "r7_impact_target_generation()"),
+            ("function", "r7_impact_approval_generation()"),
+        }
+        # Filter the reviewed public delta only; partially applied tenant DDL
+        # must still be visible as unexpected objects and block the upgrade.
+        reference = {key: value for key, value in reference.items()
+                     if key[1].split(".")[0] not in r7_tables and key not in r7_objects}
+    if predecessor == 'tv024_r6_local_capa_sources':
+        predecessor = None
+    if baseline_only or predecessor is not None:
+        omitted={('column','capa_r6_local_sources.source_capa_id'),('column','capa_r6_local_sources.source_capa_created_at'),
+                 ('constraint','capa_r6_local_sources.ck_r6_local_capa_identity')}
+        reference={key:value for key,value in reference.items() if key not in omitted}
+        key=('constraint','capa_r6_local_sources.ck_r6_local_source')
+        if key in reference and "'capa'" in reference[key]:
+            value=reference[key];position=value.index("'capa'")
+            comma=value.rfind(',',0,position);closing=value.find(']',position)
+            if comma<0 or closing<0:raise ValueError('Unexpected local source enum catalog')
+            reference[key]=value[:comma]+value[closing:]
+    if predecessor == 'tv023_r6_legacy_capture': predecessor=None
+    if baseline_only or predecessor is not None:
+        reference={key:value for key,value in reference.items()
+            if key[1].split('.')[0]!='capa_r6_legacy_captures' and key!=('function','r6_reject_legacy_capture_mutation()')}
+    if predecessor == 'tv022_r6_local_snapshot': predecessor=None
+    if baseline_only or predecessor is not None:
+        witness_objects={('column','capa_r6_local_revisions.root_snapshot_revision_id'),
+            ('constraint','capa_r6_local_revisions.fk_r6_local_snapshot_root'),
+            ('constraint','capa_r6_local_revisions.ck_r6_local_snapshot_count'),
+            ('constraint','capa_r6_local_revisions.r6_validate_local_snapshot_witness'),
+            ('trigger','capa_r6_local_revisions.r6_validate_local_snapshot_witness'),
+            ('function','r6_validate_local_snapshot_witness()')}
+        reference={key:value for key,value in reference.items() if key not in witness_objects}
+        key=('constraint','capa_r6_local_revisions.ck_r6_local_inputs')
+        if key in reference:reference[key]=reference[key].replace('source_count >= 0','source_count > 0')
+    if predecessor == 'tv021_r6_manual_receipts': predecessor=None
+    if baseline_only or predecessor is not None:
+        reference={key:value for key,value in reference.items() if key[1].split('.')[0]!='capa_r6_manual_decision_receipts' and key!=('function','r6_validate_manual_decision_receipt()')}
+    if predecessor == 'tv020_r6_local_closure': predecessor=None
+    if baseline_only or predecessor is not None:
+        local_tables={'capa_r6_local_revisions','capa_r6_local_sources'}
+        reference={key:value for key,value in reference.items() if key[1].split('.')[0] not in local_tables
+            and key not in {('column','capa_docg_analysis.analysis_method'),('constraint','capa_docg_analysis.ck_docg_analysis_method'),('trigger','capa_docg_analysis.r6_complete_local_record'),('constraint','capa_docg_analysis.r6_complete_local_record'),('function','r6_complete_local_record()')}}
+        old_done="c|CHECK (status::text <> 'done'::text OR affected_docs IS NOT NULL AND analysis_input_hash IS NOT NULL AND llm_available = true AND completed_at IS NOT NULL)|false|false"
+        # Historical comparison restores the reviewed pre-020 constraint;
+        # never filters tenant objects, so partial deltas remain visible.
+        key=('constraint','capa_docg_analysis.chk_docg_analysis_done_complete')
+        if key in reference: reference[key]=old_done
+    if predecessor == 'tv019_r6_verify_origins': predecessor=None
+    if baseline_only or predecessor is not None:
+        verification_objects = {('column','capa_root_cause_verification.r6_source_origins'),
+            ('trigger','capa_root_cause_verification.r6_retain_verification_origins'),
+            ('function','r6_retain_verification_origins()'), ('function','r6_verification_ref_origin(ref jsonb)')}
+        reference = {key:value for key,value in reference.items() if key not in verification_objects}
+    if predecessor == 'tv018_r6_d4_withdraw':
+        predecessor = None
+    if baseline_only or predecessor is not None:
+        reference = {key: value for key, value in reference.items()
+            if key[1].split('.')[0] != 'capa_d4_candidate_withdrawals' and key != ('function', 'r6_validate_d4_withdrawal()')}
+    if predecessor == 'tv017_r6_d4_inputs':
+        predecessor = None
+    if baseline_only or predecessor is not None:
+        input_tables = {'agent_d4_input_receipts', 'agent_d4_input_receipt_sources', 'agent_d4_command_inputs'}
+        reference = {key: value for key, value in reference.items()
+            if key[1].split('.')[0] not in input_tables and key != ('function', 'r6_complete_d4_inputs()')}
+    if predecessor == 'tv016_r6_source_epoch':
+        predecessor = None
+    if baseline_only or predecessor is not None:
+        epoch_objects = {('column', 'capa_r6_source_origins.source_version_counter'),
+            ('constraint', 'capa_r6_source_origins.ck_r6_source_version_counter'),
+            ('trigger', 'fmea_documents.r6_fmea_source_epoch'),
+            ('function', 'r6_fmea_source_epoch()')}
+        reference = {key: value for key, value in reference.items() if key not in epoch_objects}
+    if predecessor == 'tv015_r6_entry_contracts':
+        # This predecessor already owns ALL R6 contracts. Only the new epoch
+        # delta is absent; partial tenant deltas remain visible and fail closed.
+        predecessor = None
+    if baseline_only or predecessor is not None:
+        # Reviewed R6 additions are filtered only from the canonical reference.
+        # A historical tenant with even one partial R6 object remains different.
+        r6_tables = {'capa_r6_material_versions', 'capa_r6_entry_switches', 'capa_r6_report_snapshots',
+                     'capa_r6_source_origins', 'agent_d4_candidate_commands',
+                     'agent_d4_candidate_checkpoint_positions', 'capa_d4_candidates',
+                     'capa_d4_candidate_sources', 'capa_r6_root_revision_bodies',
+                     'capa_r6_root_revision_sources', 'capa_d5_measure_revisions',
+                     'capa_r6_staff_receipts', 'capa_r6_root_delivery_bindings'}
+        r6_functions = {'r6_immutable_history', 'r6_material_monotonic', 'r6_candidate_transition',
+                        'r6_validate_origin', 'r6_validate_correction', 'r6_preserve_adoption',
+                        'r6_complete_candidate_sources', 'r6_complete_root_sources', 'r6_root_history_order'}
+        r6_existing = {
+            ('constraint', 'agent_tasks.uq_r6_task_report'), ('index', 'agent_tasks.uq_r6_task_report'),
+            ('constraint', 'agent_runs.uq_r6_run_task'), ('index', 'agent_runs.uq_r6_run_task'),
+            ('constraint', 'agent_task_messages.uq_r6_message_task'), ('index', 'agent_task_messages.uq_r6_message_task'),
+            ('constraint', 'capa_d4_root_cause_revisions.uq_r6_root_report'), ('index', 'capa_d4_root_cause_revisions.uq_r6_root_report'),
+            ('constraint', 'agent_d5_basis_receipts.uq_r6_basis_root'), ('index', 'agent_d5_basis_receipts.uq_r6_basis_root'),
+            ('constraint', 'agent_d4_recovery_checkpoints.uq_r6_checkpoint_task'), ('index', 'agent_d4_recovery_checkpoints.uq_r6_checkpoint_task'),
+            ('trigger', 'capa_d5_measures.r6_preserve_adoption'),
+        }
+        reference = {key: value for key, value in reference.items()
+                     if key not in r6_existing
+                     and not (key[0] == 'function' and key[1].split('(', 1)[0] in r6_functions)
+                     and not (key[0] in {'table', 'column', 'constraint', 'index', 'trigger'}
+                              and key[1].split('.', 1)[0] in r6_tables)}
+    has_responses = predecessor == 'tv014_r5_responses'
+    if has_responses:
+        # The full R5 merge shape is identical apart from the explicit protocol.
+        predecessor = 'tv013_r5_main_merge'
     # Only historical reference shapes exclude the two reviewed later columns.
     # Current parity and the tenant side remain complete and fail closed.
     if baseline_only or (predecessor is not None and predecessor not in {"tv007_characteristic_refs", "tv009_r4b_main_merge", "tv010_r5_d5_proposals", "tv011_r5_d5_basis", "tv012_r5_models", "tv010_refresh_sessions", "tv013_r5_main_merge"}):
@@ -195,6 +345,8 @@ async def compare_business_schema(connection: AsyncConnection, reference_schema:
             ("column", "agent_model_deployments.api_protocol"),
             ("constraint", "agent_model_deployments.ck_model_deployment_api_protocol"),
         }
+        if has_responses:
+            added_objects = set()
         if predecessor in {"tv002_agent_task_core", "tv003_agent_readonly_delivery"}:
             added_objects |= {
                 ("column", "agent_runs.resume_checkpoint_id"),

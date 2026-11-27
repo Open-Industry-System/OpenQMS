@@ -1,6 +1,21 @@
 """Exact dedicated runtime routes; additions must explicitly register admission."""
-RUNTIME_ROUTES = frozenset({
+IQC_INVESTIGATION_RUNTIME = "/api/agent/runtime/iqc-investigation"
+PFMEA_IMPACT_RUNTIME = "/api/agent/runtime/pfmea-impact"
+PFMEA_IMPACT_ROUTES = frozenset({
+    ("GET", f"{PFMEA_IMPACT_RUNTIME}/material"),
+    *(("POST", f"{PFMEA_IMPACT_RUNTIME}/{name}") for name in ("search", "page", "confirm", "infer", "result")),
+})
+IQC_INVESTIGATION_ROUTES = frozenset({
+    ("GET", f"{IQC_INVESTIGATION_RUNTIME}/context"),
+    *(("POST", f"{IQC_INVESTIGATION_RUNTIME}/{name}") for name in (
+        "items", "reinspections", "associations", "history", "material", "supplier", "infer", "result",
+    )),
+})
+RUNTIME_ROUTES = PFMEA_IMPACT_ROUTES | IQC_INVESTIGATION_ROUTES | frozenset({
     ("POST", "/api/agent/runtime/model/infer"),
+    ("POST", "/api/agent/runtime/model/tools"),
+    ("POST", "/api/agent/runtime/capa/d4/candidates"),
+    ("POST", "/api/agent/runtime/capa/d4/checkpoints"),
     ("POST", "/api/agent/runtime/claim"),
     ("POST", "/api/agent/runtime/capa/d5/proposals"),
     ("GET", "/api/agent/runtime/capabilities"),

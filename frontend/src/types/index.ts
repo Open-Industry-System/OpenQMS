@@ -178,6 +178,9 @@ export interface SupplierRiskInputProjection {
 }
 
 export interface CAPAReport {
+  material_version?: string;
+  entry_phase?: "legacy" | "draining" | "switched";
+  entry_epoch?: number;
   report_id: string;
   document_no: string;
   title: string;
@@ -1593,6 +1596,7 @@ export interface D7RecommendationResponse {
 }
 
 export interface D4Recommendation {
+  capture_id?: string;
   stage_index?: number | null;
   failure_cause_node_id: string | null;
   failure_cause_name: string;
@@ -1646,6 +1650,7 @@ export interface D4RecommendationResponse {
 }
 
 export interface D5ExistingControl {
+  capture_id?: string;
   stage_index?: number | null;
   failure_mode_node_id: string | null;
   failure_mode_name: string | null;
@@ -1665,6 +1670,7 @@ export interface D5ExistingControl {
 }
 
 export interface D5GeneralSuggestion {
+  capture_id?: string;
   stage_index?: number | null;
   content: string;
   category: string;
@@ -2047,6 +2053,7 @@ export interface SystemLogItem {
 
 // --- CAPA D4 verification / adoption / D7 node actions (Spec A) ---
 export interface AdoptRequest {
+  capture_id?: string;
   d_step: "d4" | "d5";
   adopted_text: string;
   source: string;
@@ -2070,6 +2077,7 @@ export interface Verification {
   is_verified: boolean;
   conclusion: VerificationConclusion;
   evidence_attachments: Record<string, unknown>[];
+  known_source_origins?: {kind:"fmea";fmea_id:string;cause_node_id:string;factory_id:string;product_line_code:string}[];
   source_ref: Record<string, unknown> | null;
   verified_by: string | null;
   verified_at: string | null;

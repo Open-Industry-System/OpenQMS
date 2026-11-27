@@ -3,6 +3,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.capa import CAPAEightD
+from app.services.capa_d4_material import ordinary_capa_predicate
 from app.services.lessons_learned.context import LessonsLearnedContext
 from app.services.lessons_learned.sources.base import LessonsSource
 from app.services.recommendation_types import RecommendationCandidate
@@ -32,6 +33,14 @@ class LessonsCAPASource(LessonsSource):
         except Exception:
             return []
 
+        from app.core.permissions import PermissionLevel
+        from app.services.capa_current_access import current_capa_actor_access, capa_target_filters
+        access = None
+        if context.actor_id is not None:
+            try:
+                access = await current_capa_actor_access(self.db, context.actor_id, PermissionLevel.VIEW)
+            except PermissionError:
+                return []
         # pgvector semantic search on capa d2_description embeddings
         pl_filter = ""
         params: dict = {"query_vector": vec_str, "limit": 20}
@@ -41,6 +50,16 @@ class LessonsCAPASource(LessonsSource):
             for i, pl in enumerate(context.user_product_lines):
                 params[f"pl{i}"] = pl
 
+        authority_filter = ''
+        if access is not None:
+            factories, lines = access
+            if factories.accessible_factory_ids is not None:
+                authority_filter += ' AND eligible_capa.factory_id = ANY(:current_factories)'
+                params['current_factories'] = list(factories.accessible_factory_ids)
+            if lines.mode != 'ALL':
+                authority_filter += ' AND eligible_capa.product_line_code = ANY(:current_lines)'
+                params['current_lines'] = list(lines.codes or [])
+
         stmt = text(f"""
             SELECT
                 de.entity_id,
@@ -48,9 +67,11 @@ class LessonsCAPASource(LessonsSource):
                 de.product_line_code,
                 1 - (de.embedding <=> CAST(:query_vector AS vector)) AS similarity
             FROM document_embeddings de
+            JOIN capa_eightd eligible_capa ON eligible_capa.report_id = de.entity_id
             WHERE de.entity_type = 'capa'
               AND de.entity_field = 'd2_description'
-              {pl_filter}
+              AND {ordinary_capa_predicate('de.entity_id')}
+              {pl_filter} {authority_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
             LIMIT :limit
         """)
@@ -66,7 +87,11 @@ class LessonsCAPASource(LessonsSource):
             .where(CAPAEightD.report_id.in_(capa_ids))
             .where(CAPAEightD.status.in_(["D8_CLOSURE", "ARCHIVED"]))
             .where(CAPAEightD.report_id != context.doc_id)
+            .where(text(ordinary_capa_predicate('capa_eightd.report_id')))
         )
+        if access is not None:
+            factories, lines = await current_capa_actor_access(self.db, context.actor_id, PermissionLevel.VIEW)
+            capa_query = capa_target_filters(capa_query, factories, lines)
         capa_result = await self.db.execute(capa_query)
         capa_map = {c.report_id: c for c in capa_result.scalars().all()}
 

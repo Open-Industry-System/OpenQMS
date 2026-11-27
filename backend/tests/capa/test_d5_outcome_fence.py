@@ -8,6 +8,36 @@ from tests.capa.test_capa_outcome_decision import decision_provider
 
 pytestmark = pytest.mark.requires_db
 
+
+async def _pending_source_valid_proposal(c):
+    """R5 initial fixture: pending sibling with the established current basis."""
+    from uuid import uuid4
+    from sqlalchemy import select, update
+    from app.models.agent_d5_command import AgentD5Command
+    from app.models.capa_d5_proposal import CapaD5Proposal, CapaD5ProposalSource
+    from app.models.role import RolePermission
+    original = await c.db.get(CapaD5Proposal, c.proposals[0])
+    sources = list((await c.db.scalars(select(CapaD5ProposalSource).where(
+        CapaD5ProposalSource.proposal_id == original.proposal_id))).all())
+    proposal_id, command_id = uuid4(), uuid4()
+    c.db.add(AgentD5Command(command_id=command_id, task_id=c.task_id, run_id=c.run_id,
+        proposal_id=proposal_id, command_key='outcome-membership', operation='save',
+        request_hmac='b'*64, sequence=3))
+    await c.db.flush()
+    c.db.add(CapaD5Proposal(proposal_id=proposal_id, report_id=c.report.report_id,
+        task_id=c.task_id, original_text='additional pending fixture', state='pending',
+        revision_id=original.revision_id, proof_id=original.proof_id,
+        command_id=command_id, created_by=c.user_id))
+    await c.db.flush()
+    for source in sources:
+        c.db.add(CapaD5ProposalSource(proposal_id=proposal_id, projection_id=source.projection_id,
+            factory_id=source.factory_id, product_line_code=source.product_line_code,
+            fmea_id=source.fmea_id, node_id=source.node_id, node_hmac=source.node_hmac))
+    await c.db.execute(update(RolePermission).where(RolePermission.role_id == c.actors[2].role_id,
+        RolePermission.module == 'capa').values(permission_level=3))
+    await c.db.commit()
+    return proposal_id
+
 @pytest.mark.asyncio
 async def test_outcome_refuses_partial_source_authority_before_d5_body(d5_case):
     c = d5_case
@@ -20,12 +50,21 @@ async def test_d5_snapshot_is_stable_and_versioned(d5_case):
     from app.services.capa_d5_measures import full_d5_material
     from app.services.capa_outcome_review import outcome_revision
     from app.models.capa_d5_proposal import CapaD5Measure, CapaD5ProposalSource
-    from sqlalchemy import update
+    from app.models.audit import AuditLog
+    from app.services.capa_d5_proposals import staff_action
+    from sqlalchemy import update, select
     c = d5_case
+    pending = await _pending_source_valid_proposal(c)
     before = await full_d5_material(c.db, c.report, scope=c.actors[2])
     assert before == await full_d5_material(c.db, c.report, scope=c.actors[2])
-    await c.db.execute(update(CapaD5Measure).where(CapaD5Measure.measure_id == c.measures[0]).values(final_text='NEW SENTINEL'))
-    await c.db.commit()
+    # The actual material mutation is a legal D5 adoption, including its audit;
+    # original adoption text remains immutable. Text corrections are Task 6.
+    await staff_action(c.db, c.actors[2], c.report.report_id, pending,
+        operation='adopt', operation_key='outcome-membership', value='NEW SENTINEL')
+    assert await c.db.scalar(select(AuditLog.log_id).where(
+        AuditLog.record_id == pending, AuditLog.action == 'D5_PROPOSAL_ADOPT')) is not None
+    assert await c.db.scalar(select(CapaD5Measure.final_text).where(
+        CapaD5Measure.measure_id == c.measures[0])) == 'secret final 1'
     after = await full_d5_material(c.db, c.report, scope=c.actors[2])
     assert outcome_revision({'d5_measures': before}) != outcome_revision({'d5_measures': after})
     await c.db.execute(update(CapaD5ProposalSource).where(CapaD5ProposalSource.proposal_id == c.proposals[1], CapaD5ProposalSource.fmea_id == c.docs[1].fmea_id).values(node_hmac='a'*64))
@@ -60,6 +99,23 @@ async def outcome_ready(c):
     return analysis
 
 
+async def prepare_d5_manual_round(c):
+    """Real local service re-entry from a controlled historical model round."""
+    from types import SimpleNamespace
+    from app.models.capa import CAPAEightD
+    from tests.capa.test_capa_outcome_decision import prepare_restricted_manual_round
+    report_id = c.report.report_id
+    async def report(db):
+        return await db.get(CAPAEightD, report_id, populate_existing=True)
+    async def scope(db):
+        return c.actors[2]
+    case = SimpleNamespace(report_id=report_id, actor_id=c.actors[2].user.user_id,
+        session_factory=lambda: c.factory(binding=c.binding), report=report, scope=scope)
+    await c.db.rollback()
+    await prepare_restricted_manual_round(case)
+    c.report = await report(c.db)
+
+
 @pytest.mark.asyncio
 async def test_actual_outcome_reader_binds_all_measures_and_sources(d5_case):
     from app.services.capa_outcome_review import read_outcome_review
@@ -87,15 +143,14 @@ async def test_source_reference_guard_includes_secondary_d5_source(d5_case):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('change', ['text', 'secondary-acl'])
+@pytest.mark.parametrize('change', ['ordinary-text', 'secondary-acl'])
 async def test_waiting_decision_rechecks_complete_d5_material(d5_case, change):
     import asyncio
     from types import SimpleNamespace
     from sqlalchemy import select, update, text
-    from app.models.capa_d5_proposal import CapaD5Measure
     from app.models.role import RolePermission, UserProductLine
     from app.services.capa_review_guard import lock_capa_parent, OutcomeReviewConflict
-    from app.services.capa_service import advance_capa
+    from app.services.capa_service import advance_capa, update_capa
     from app.services.capa_outcome_review import read_outcome_review
     from app.schemas.capa import AdvanceRequest
     c = d5_case
@@ -121,8 +176,12 @@ async def test_waiting_decision_rechecks_complete_d5_material(d5_case, change):
                 await asyncio.sleep(.01)
             else:
                 pytest.fail('decision did not wait on the actual CAPA parent lock')
-            if change == 'text':
-                await writer.execute(update(CapaD5Measure).where(CapaD5Measure.measure_id == c.measures[0]).values(final_text='changed while waiting'))
+            if change == 'ordinary-text':
+                # Keep the exact stale complete-material expectation while
+                # using a currently legal ordinary material write. Restricted
+                # measure TEXT correction freshness is exercised in Task 6.
+                await update_capa(writer, await writer.get(type(c.report), report_id),
+                    {'d5_correction': 'ordinary material changed while waiting'}, c.actors[2].user.user_id)
             else:
                 from sqlalchemy import delete
                 await writer.execute(delete(UserProductLine).where(UserProductLine.user_id == c.actors[2].user.user_id,
@@ -136,6 +195,21 @@ async def test_waiting_decision_rechecks_complete_d5_material(d5_case, change):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
             await writer.rollback()
+
+
+@pytest.mark.asyncio
+async def test_original_d5_adoption_refuses_in_place_text_updates(d5_case):
+    from sqlalchemy import update, select
+    from sqlalchemy.exc import DBAPIError
+    from app.models.capa_d5_proposal import CapaD5Measure
+    c = d5_case
+    with pytest.raises(DBAPIError):
+        async with c.db.begin_nested():
+            await c.db.execute(update(CapaD5Measure).where(
+                CapaD5Measure.measure_id == c.measures[0]).values(final_text='forbidden rewrite'))
+    async with c.factory(binding=c.binding) as check:
+        assert await check.scalar(select(CapaD5Measure.final_text).where(
+            CapaD5Measure.measure_id == c.measures[0])) == 'secret final 1'
 
 
 @pytest.mark.parametrize('state', ['D8_CLOSURE', 'ARCHIVED'])
@@ -158,12 +232,7 @@ async def test_restricted_only_full_material_can_be_approved_and_archived(d5_cas
     await c.db.execute(update(RolePermission).where(RolePermission.role_id == c.actors[2].role_id,
         RolePermission.module == 'capa').values(permission_level=4))
     await c.db.commit()
-    from app.services.capa_doc_gate_service import confirm_no_affected
-    c.report.status = 'D8_GATE_PENDING'
-    await c.db.commit()
-    assert (await confirm_no_affected(c.db, c.report, c.actors[2].user.user_id))['decision'] == 'passed'
-    c.report.status = 'D8_APPROVAL_PENDING'
-    await c.db.commit()
+    await prepare_d5_manual_round(c)
     seen = await read_outcome_review(c.db, c.actors[2], c.report.report_id)
     result = await advance_capa(c.db, c.report, c.actors[2].user.user_id,
         AdvanceRequest(target_state='D8_CLOSURE', expected_outcome_revision=seen.revision,

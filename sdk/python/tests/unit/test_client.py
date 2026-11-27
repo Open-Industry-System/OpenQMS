@@ -12,7 +12,7 @@ def test_client_module_exists():
 
 
 class FakeTransport:
-    def __init__(self, config):
+    def __init__(self, config, **kwargs):
         self.config = config
         self.calls = []
         self.closed = False
@@ -66,6 +66,10 @@ def invoke(run, op):
         'save_checkpoint': lambda: run.save_checkpoint(idempotency_key='checkpoint-key', receipt_ids=(U,)),
         'message_history': lambda: run.message_history(after_sequence=99, limit=20),
         'finish': lambda: run.finish(status='completed'),
+        'model_turn': lambda: run.model_turn(turn=0),
+        'model_tool': lambda: run.model_tool(call_id='opaque'),
+        'save_d4_checkpoint': lambda: run.save_d4_checkpoint(),
+        'save_d4_candidate': lambda: run.save_d4_candidate(command_key='safe',text=SECRET),
     }[op]()
 
 
@@ -81,7 +85,8 @@ def test_nine_run_operations_are_single_exchange_with_opaque_token(monkeypatch, 
         'ack_messages': 'MessageAck', 'capa_context': 'CapaContext',
         'record_event': 'RuntimeEvent', 'save_result': 'RuntimeResult',
         'save_checkpoint': 'ReadonlyCheckpoint', 'message_history': 'MessageHistory',
-        'finish': 'FinishResult',
+        'finish': 'FinishResult', 'model_turn':'ModelTurn','model_tool':'ModelToolResult',
+        'save_d4_checkpoint':'D4CandidateCheckpoint','save_d4_candidate':'D4CandidateReference',
     }[op]
     assert len(wire.calls) == 1
     operation, token, request, deadline = wire.calls[0]

@@ -518,7 +518,8 @@ class TestRateLimitAndErrors:
             return _PC()
 
         async def _bad_complete(pc, prompt, schema):
-            raise Exception("JSON decode error")
+            import json
+            raise json.JSONDecodeError("PRIVATE_JSON_ERROR_CANARY", "private input", 0)
 
         monkeypatch.setattr(provider_adapter, "build_client", _build_client)
         monkeypatch.setattr(provider_adapter, "complete_json", _bad_complete)
@@ -527,6 +528,7 @@ class TestRateLimitAndErrors:
         with pytest.raises(HTTPException) as exc:
             await generate_draft(db, capa.report_id, "d2", req, user, _FakeReq())
         assert exc.value.status_code == 422
+        assert "PRIVATE_JSON_ERROR_CANARY" not in str(exc.value.detail)
 
 
 class TestBuildPrompt:
@@ -863,3 +865,7 @@ async def test_draft_503_when_pc_none_no_attribute_error(
     with pytest.raises(HTTPException) as ei:
         await generate_draft(db, capa.report_id, "d2", req, admin_user, _Req())
     assert ei.value.status_code == 503
+
+
+# Isolate prompt/orchestration units; real DB sessions still use current authority.
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa: F401,E402

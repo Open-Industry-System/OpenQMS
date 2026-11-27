@@ -45,9 +45,10 @@ async def _make_capa(db, factory_id, user_id, doc_no):
 @pytest.mark.asyncio
 async def test_adopt_endpoint_appends_d4(capa_client, db, default_factory, admin_user):
     capa = await _make_capa(db, default_factory.id, admin_user.user_id, "8D-API-ADOPT")
-    resp = await capa_client.post(f"/api/capa/{capa.report_id}/adopt-recommendation",
-        json={"d_step": "d4", "adopted_text": "根因B", "source": "fmea_graph",
-              "item_ref": {"failure_cause_node_id": "c1"}})
+    from app.schemas.capa_verification import AdoptRequest
+    from tests.capa.legacy_capture_support import bind_rule_candidate
+    req=await bind_rule_candidate(db,capa,AdoptRequest(d_step='d4',adopted_text='根因B',source='rule',item_ref={'entry_id':'rule-c1'}),admin_user)
+    resp = await capa_client.post(f"/api/capa/{capa.report_id}/adopt-recommendation",json=req.model_dump(mode='json'))
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["field_value"] == "根因B"

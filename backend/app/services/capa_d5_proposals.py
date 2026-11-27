@@ -66,6 +66,8 @@ async def _current_basis(db, identity):
         raise PermissionError(UNAVAILABLE)
     await require_source_authority(db, identity, primary, dict(projection_id=proof.source_projection_id,
         fmea_id=str(proof.fmea_id), node_id=proof.cause_node_id))
+    from app.services.capa_r6_delivery import require_root_delivery
+    await require_root_delivery(db, identity, target, proof)
     return target, proof
 
 
@@ -152,6 +154,10 @@ class D5ContextSnapshot:
 
 
 async def build_d5_context(db, identity, *, source_queries):
+    from app.services.capa_entry_switch import require_generation_enabled
+    require_generation_enabled()
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     """Execute authorized context reads and seal EXACT bodies/source versions.
 
     An internal tool dispatcher may request additional supported coordinates;
@@ -165,11 +171,23 @@ async def build_d5_context(db, identity, *, source_queries):
     target, proof = await _current_basis(db, current)
     if not isinstance(source_queries, list) or not source_queries:
         raise PermissionError(UNAVAILABLE)
-    sources, tools = [], []
+    from app.services.agent_runtime.model_egress import R6_PROFILE
+    r6 = current.trial is not None and current.trial.profile == R6_PROFILE
+    sources, tools, context_epochs = [], [], []
     for query in source_queries:
         source = await _source(db, current, query)
-        node = (await db.execute(text(_NODES + 'SELECT n FROM nodes WHERE octet_length(n::text) <= 65536 AND (SELECT count(*) FROM nodes) = 1'), {
-            'fmea_id': UUID(source['fmea_id']), 'node_id': source['node_id']})).scalar_one_or_none()
+        params = {'fmea_id': UUID(source['fmea_id']), 'node_id': source['node_id']}
+        if r6:
+            # One MVCC statement captures the body and its source-parent epoch.
+            pair = (await db.execute(text(_NODES + '''SELECT n,
+                (SELECT lock_version FROM fmea_documents WHERE fmea_id=:fmea_id) AS source_epoch
+                FROM nodes WHERE octet_length(n::text) <= 65536 AND (SELECT count(*) FROM nodes) = 1'''), params)).one_or_none()
+            node, epoch = pair if pair is not None else (None, None)
+            if type(epoch) is not int or epoch < 0:
+                raise PermissionError(UNAVAILABLE)
+            context_epochs.append(dict(source, source_version_counter=epoch))
+        else:
+            node = (await db.execute(text(_NODES + 'SELECT n FROM nodes WHERE octet_length(n::text) <= 65536 AND (SELECT count(*) FROM nodes) = 1'), params)).scalar_one_or_none()
         if not isinstance(node, dict):
             raise PermissionError(UNAVAILABLE)
         # Recheck against precisely the body just read, not a later node.
@@ -191,6 +209,15 @@ async def build_d5_context(db, identity, *, source_queries):
         sources=sorted({tuple(sorted(source.items())): source for source in sources}.values(),
             key=lambda source: (source['projection_id'], source['fmea_id'], source['node_id'])),
         context=dict(d4_root_cause=await _bounded_field(db, target.report_id), tools=tools))
+    from app.services.capa_r6_delivery import require_root_delivery, complete_root_input_binding, validate_context_source_epochs
+    if r6:
+        context_epochs = sorted({tuple(sorted(entry.items())): entry for entry in context_epochs}.values(),
+            key=lambda entry: (entry['projection_id'], entry['fmea_id'], entry['node_id']))
+        await validate_context_source_epochs(db, payload['sources'], context_epochs, scope=current.scope)
+        payload['context_source_epochs'] = context_epochs
+    root_binding = complete_root_input_binding(await require_root_delivery(db, current, target, proof), context_epochs)
+    if root_binding is not None:
+        payload['root_input_binding'] = root_binding
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
     return D5ContextSnapshot(raw, _digest('openqms.d5.context-snapshot.v1', payload))
 
@@ -204,6 +231,10 @@ def _digest_node(node):
 
 
 async def validate_d5_context_for_release(db, identity, *, snapshot):
+    from app.services.capa_entry_switch import require_generation_enabled
+    require_generation_enabled()
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     """Lock and revalidate the EXACT signed snapshot; this creates no receipt.
 
     The model egress uses it immediately before outbound under current source,
@@ -228,6 +259,16 @@ async def validate_d5_context_for_release(db, identity, *, snapshot):
     current = await runtime_access.refresh_runtime_identity(db, current)
     d5_commands.require_r5_admission(current)
     target, proof = await _current_basis(db, current)
+    from app.services.capa_r6_delivery import require_root_delivery, complete_root_input_binding, validate_context_source_epochs
+    from app.services.agent_runtime.model_egress import R6_PROFILE
+    epochs = payload.get('context_source_epochs')
+    if current.trial is not None and current.trial.profile == R6_PROFILE:
+        await validate_context_source_epochs(db, payload['sources'], epochs, scope=current.scope)
+    elif epochs is not None:
+        raise PermissionError(UNAVAILABLE)
+    expected_root = complete_root_input_binding(await require_root_delivery(db, current, target, proof), epochs)
+    if payload.get('root_input_binding') != expected_root:
+        raise PermissionError(UNAVAILABLE)
     expected = dict(tenant_id=str(current.binding.tenant_id), task_id=str(current.task.task_id), run_id=str(current.run.run_id),
         report_id=str(target.report_id), revision_id=str(proof.revision_id), proof_id=str(proof.proof_id),
         lease_epoch=current.run.lease_epoch, tenant_generation=current.binding.generation)
@@ -257,6 +298,8 @@ async def record_delivered_basis(db, identity, *, snapshot):
     receipt.basis_hmac = _digest('openqms.d5.delivered-basis.v1', _receipt_payload(receipt, current.binding.tenant_id))
     db.add(receipt)
     await db.flush()
+    from app.services.capa_r6_delivery import add_root_delivery_binding
+    await add_root_delivery_binding(db, current, receipt, json.loads(snapshot.payload_json).get('root_input_binding'))
     return receipt.receipt_id
 
 
@@ -270,6 +313,9 @@ async def delivered_sources(db, identity):
         raise PermissionError(UNAVAILABLE)
     union = {}
     for receipt in receipts:
+        from app.services.capa_r6_delivery import validate_root_delivery_binding
+        await validate_root_delivery_binding(db, receipt, identity.binding.tenant_id,
+            scope=identity.scope, identity=identity, target=target, proof=proof)
         if (receipt.task_id != identity.task.task_id or receipt.report_id != target.report_id
                 or receipt.revision_id != proof.revision_id or receipt.proof_id != proof.proof_id
                 or receipt.lease_epoch != identity.run.lease_epoch
@@ -364,6 +410,10 @@ async def replay_reference(db, identity, command):
     row = matching[0]
     pinned_sources = set()
     for receipt in receipts:
+        from app.services.capa_r6_delivery import validate_root_delivery_binding
+        target, proof = await _current_basis(db, identity)
+        await validate_root_delivery_binding(db, receipt, identity.binding.tenant_id, scope=identity.scope,
+            identity=identity, target=target, proof=proof)
         if (receipt.task_id != identity.task.task_id or receipt.run_id != stored.run_id
                 or receipt.report_id != identity.task.target_capa_id
                 or receipt.revision_id != row.revision_id or receipt.proof_id != row.proof_id
@@ -465,6 +515,8 @@ async def staff_action(db, scope, report_id, proposal_id, *, operation, operatio
     request = (D5Adopt(operation_key=operation_key, final_text=value) if operation == 'adopt'
         else D5Withdraw(operation_key=operation_key, reason=value))
     await _staff_metadata(db, scope, report_id, proposal_id)
+    from app.services.capa_entry_switch import admit
+    await admit(db, "current")
     await db.scalar(select(CAPAEightD.report_id).where(CAPAEightD.report_id == report_id).with_for_update())
     await db.scalar(select(CapaD5Proposal.proposal_id).where(
         CapaD5Proposal.proposal_id == proposal_id, CapaD5Proposal.report_id == report_id).with_for_update())
@@ -521,6 +573,8 @@ async def staff_action(db, scope, report_id, proposal_id, *, operation, operatio
         action='D5_PROPOSAL_' + operation.upper(), operated_by=scope.user.user_id,
         factory_id=target.factory_id, changed_fields=dict(proposal_id=str(proposal_id),
             operation=operation, reference_id=str(reference))))
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, report_id)
     await db.commit()
     result = dict(proposal_id=proposal_id, state='adopted' if operation == 'adopt' else 'withdrawn')
     if operation == 'adopt': result['measure_id'] = reference

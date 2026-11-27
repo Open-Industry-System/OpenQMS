@@ -60,9 +60,10 @@ def test_paired_protocol_deltas_preserve_published_parents_and_single_heads():
     public = (root / 'alembic/versions/20261115_r5_responses.py').read_text()
     tenant = (root / 'alembic_tenant/versions/tv014_r5_responses.py').read_text()
     assert public.replace(PUBLIC, TENANT).replace(PARENT, TENANT_PARENT) == tenant
-    for directory, expected in [('alembic', '20261116_security_main_merge'), ('alembic_tenant', TENANT)]:
+    for directory in ('alembic', 'alembic_tenant'):
         config = Config(); config.set_main_option('script_location', str(root / directory))
-        assert ScriptDirectory.from_config(config).get_heads() == [expected]
+        assert ScriptDirectory.from_config(config).get_heads() == [
+            '20261118_r7_iqc_facts' if directory == 'alembic' else 'tv026_r7_iqc_facts']
 
 
 @pytest.mark.asyncio
@@ -142,11 +143,13 @@ def test_nonempty_responses_refuses_downgrade_atomically(mig_db_url):
 
 
 @pytest.mark.asyncio
-async def test_current_tenant_protocol_column_has_full_parity(mig_db_url, monkeypatch):
+async def test_historical_responses_tenant_protocol_column_has_full_parity(mig_db_url, monkeypatch):
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
     from app.schemas.platform import TenantCreateRequest
     from app.services import tenant_migrator
+    # Exercise the published R5 revision exactly; current-head parity is R6's contract.
+    monkeypatch.setattr(tenant_migrator, 'REVISION', TENANT)
     from app.services.tenant_schema_diff import load_snapshot_manifest
     await asyncio.to_thread(command.upgrade, _migration_config(mig_db_url), PUBLIC)
     engine = create_async_engine(mig_db_url, poolclass=NullPool)

@@ -306,8 +306,11 @@ def test_real_postgres_matches_models_and_enforces_proof_history(mig_db_url):
                         assert actual[column.name]["type"].timezone is True
                     assert bool(actual[column.name]["default"]) == bool(column.server_default)
                 assert inspector.get_pk_constraint(name)["name"] == model.primary_key.name
+                # This test migrates the published R4b revision; the current
+                # model additionally carries R6's report-composite target key.
                 assert {item["name"] for item in inspector.get_unique_constraints(name)} == {
-                    item.name for item in model.constraints if isinstance(item, sa.UniqueConstraint)}
+                    item.name for item in model.constraints if isinstance(item, sa.UniqueConstraint)
+                    and item.name != "uq_r6_root_report"}
                 assert {item["name"] for item in inspector.get_check_constraints(name)} == {
                     item.name for item in model.constraints if isinstance(item, sa.CheckConstraint)}
                 assert {item["name"] for item in inspector.get_foreign_keys(name)} == {

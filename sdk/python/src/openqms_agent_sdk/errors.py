@@ -1,9 +1,11 @@
 """Sanitized diagnostics; kinds are internal, never server business codes."""
 
 _SAFE_OPERATIONS = frozenset({
+    "pfmea_impact_material", "pfmea_impact_search", "pfmea_impact_page",
+    "pfmea_impact_confirm", "pfmea_impact_result",
     "unknown", "config", "claim", "capabilities", "claim_messages", "ack_messages",
     "capa_context", "record_event", "save_result", "save_checkpoint",
-    "message_history", "finish", "close",
+    "message_history", "finish", "close", "save_d4_candidate", "model_turn", "model_tool", "save_d4_checkpoint",
 })
 _SAFE_KINDS = frozenset({
     "unknown", "invalid_config", "invalid_timeout", "invalid_response_budget",
