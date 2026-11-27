@@ -159,7 +159,19 @@ def test_shared_account_without_assigned_scenario_is_denied(shared_config):
         assert fetch(port, 'POST', '/scenario/d4-deliver', origin=shared_config['origin'], **login)[0] == 403
 
 
-@pytest.mark.parametrize('violation', ['wrong-role', 'viewer', 'missing-role', 'missing-scenario', 'legacy'])
+def test_only_the_declared_scenario_is_available(shared_config):
+    shared_config['scenario_roles'] = {'d4-deliver': 'field_qe'}
+    shared_config['tasks'] = {'d4-deliver': str(uuid4())}
+    MODULE['validate_config'](shared_config)
+    with portal(shared_config, lambda _: pytest.fail('executor was invoked')) as port:
+        login = dict(username='engineer', password='engineer-fixture')
+        status, body = fetch(port, 'GET', **login)
+        assert status == 200 and '/scenario/d4-deliver' in body and '/scenario/d4-revoke' not in body
+        assert fetch(port, 'POST', '/scenario/d4-revoke', origin=shared_config['origin'], **login)[0] == 403
+        assert fetch(port, 'GET', username='manager', password='manager-fixture')[0] == 403
+
+
+@pytest.mark.parametrize('violation', ['wrong-role', 'viewer', 'missing-role', 'no-scenarios', 'unknown-scenario', 'legacy'])
 def test_invalid_shared_credential_configuration_fails_closed(shared_config, violation):
     if violation == 'wrong-role':
         shared_config['accounts']['engineer']['role'] = 'manager'
@@ -167,8 +179,10 @@ def test_invalid_shared_credential_configuration_fails_closed(shared_config, vio
         shared_config['accounts']['viewer'] = shared_config['accounts']['engineer']
     elif violation == 'missing-role':
         del shared_config['accounts']['manager']
-    elif violation == 'missing-scenario':
-        del shared_config['scenario_roles']['d4-revoke']
+    elif violation == 'no-scenarios':
+        shared_config['scenario_roles'].clear()
+    elif violation == 'unknown-scenario':
+        shared_config['scenario_roles']['not-a-d4-scenario'] = 'field_qe'
     else:
         shared_config.update(username='legacy-fixture')
     with pytest.raises(ValueError, match='invalid shared acceptance'):

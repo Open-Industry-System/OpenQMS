@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare and witness two synthetic D4 tasks in pre-approved lease containers."""
+"""Prepare and witness synthetic D4 tasks in pre-approved lease containers."""
 import argparse
 import grp
 import json
@@ -81,8 +81,9 @@ def permitted_cells(prepared, binding):
     release = decode(read_owned(release_file, 32768))
     require(release['sha'] == binding['merge'] and release['shared_lease'] == binding['lease'],
             'D4 infrastructure does not match the deployed release')
-    require(set(prepared) == {'binding', 'cases'} and set(prepared['cases']) == set(SCENARIOS)
-            and len(inventory) == 4, 'two exact D4 infrastructure cells required')
+    require(set(prepared) == {'binding', 'cases'} and isinstance(prepared['cases'], dict)
+            and prepared['cases'] and prepared['cases'].keys() <= SCENARIOS.keys()
+            and len(inventory) == 2 * len(prepared['cases']), 'exact D4 infrastructure cells required')
     common = {'api_container_id', 'db_container_id', 'db_image_id',
               'db_system_identifier', 'db_host', 'api_port'}
     for scenario, cell in prepared['cases'].items():
@@ -194,9 +195,9 @@ def seed(cell, binding, source, directory):
             | {key: task[key] for key in ('tenant_id', 'schema', 'generation', 'task_id', 'grant_id', 'installation_id')})
 
 
-def provision(lease):
+def provision(lease, *, guard=None):
     require(re.fullmatch('[a-f0-9]{32}', lease), 'invalid D4 lease')
-    with hold_test_slot():
+    with (guard or hold_test_slot)():
         slot = database_binding(lease, 'testing')
         directory = QUEUE_ROOT / 'd4' / lease
         trusted_directory(directory, private=True)

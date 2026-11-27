@@ -61,7 +61,7 @@ def validate_accounts(config):
     accounts, roles = config.get('accounts'), config.get('scenario_roles')
     if (legacy_fields & config.keys() or not isinstance(accounts, dict) or not accounts
             or not accounts.keys() <= SHARED_ACCOUNT_ROLES.keys()
-            or not isinstance(roles, dict) or roles.keys() != SCENARIOS.keys()
+            or not isinstance(roles, dict) or not roles or not roles.keys() <= SCENARIOS.keys()
             or any(not isinstance(account, dict) or set(account) != {'role', 'salt', 'password_digest'}
                    or account['role'] != SHARED_ACCOUNT_ROLES[username] or not valid_password_verifier(account)
                    for username, account in accounts.items())):
@@ -81,14 +81,15 @@ def validate_config(config):
         raise ValueError('invalid executor or report configuration')
 
     tasks = config.get('tasks')
-    if tasks is not None and (not isinstance(tasks, dict) or set(tasks) != set(SCENARIOS)
+    scenarios = config.get('scenario_roles', SCENARIOS)
+    if tasks is not None and (not isinstance(tasks, dict) or tasks.keys() != scenarios.keys()
                               or not all(canonical_uuid(task) for task in tasks.values())
                               or len(set(tasks.values())) != len(tasks)):
         raise ValueError('invalid dedicated acceptance tasks')
     validate_binding(config['binding'])
 
 
-def validate_binding(binding):
+def validate_binding(binding, *, now=None):
     if set(binding) != {'pr', 'head', 'merge', 'plan', 'lease', 'report_id', 'issued_at', 'expires_at'}:
         raise ValueError('invalid acceptance binding schema')
     if type(binding['pr']) is not int or not 0 < binding['pr'] < 10**9:
@@ -96,10 +97,11 @@ def validate_binding(binding):
     for key, size in [('head', 40), ('merge', 40), ('plan', 64), ('lease', 32)]:
         if not re.fullmatch(f'[0-9a-f]{{{size}}}', binding[key]):
             raise ValueError('invalid acceptance binding')
+    now = time.time() if now is None else now
     if (not canonical_uuid(binding['report_id'])
             or type(binding['issued_at']) is not int or type(binding['expires_at']) is not int
             or not 0 < binding['expires_at'] - binding['issued_at'] <= 3600
-            or not binding['issued_at'] <= time.time() < binding['expires_at']):
+            or not binding['issued_at'] <= now < binding['expires_at']):
         raise ValueError('invalid or expired acceptance window')
 
 
@@ -128,13 +130,17 @@ def authenticated_role(header, config):
         return None
 
 
-def executor_call(path, payload, *, deadline=None):
+def trusted_executor_socket(path):
     target = Path(path)
     parent, socket_info = target.parent.lstat(), target.lstat()
     if (not stat.S_ISDIR(parent.st_mode) or parent.st_uid != 0 or parent.st_mode & 0o022
             or not stat.S_ISSOCK(socket_info.st_mode) or socket_info.st_uid != 0
             or socket_info.st_mode & 0o007):
         raise ValueError('executor socket must be owned by the trusted runtime')
+
+
+def executor_call(path, payload, *, deadline=None):
+    trusted_executor_socket(path)
     deadline = min(deadline, time.monotonic() + 50) if deadline is not None else time.monotonic() + 50
 
     def remaining():
@@ -184,13 +190,18 @@ def validated_receipt(result, request):
     return '通过' if passed else '失败'
 
 
+def binding_fingerprint(binding):
+    payload = json.dumps(binding, separators=(',', ':'), sort_keys=True).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
 def handler(config, invoke):
     binding = config['binding']
     tasks = config.get('tasks', {})
     scenario_roles = config.get('scenario_roles')
 
     def can_run(role, scenario):
-        return scenario_roles is None or scenario_roles[scenario] == role
+        return scenario_roles is None or scenario_roles.get(scenario) == role
 
     class Browser(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -227,6 +238,26 @@ def handler(config, invoke):
             return role
 
         def do_GET(self):
+            if self.path == '/healthz':
+                # An unauthenticated probe gets an opaque binding hash only.
+                # Browser scenario operations still require the issued role.
+                if time.time() >= binding['expires_at']:
+                    self.show(410, '<p>本轮验收已到期</p>')
+                    return
+                try:
+                    trusted_executor_socket(config['executor_socket'])
+                except (OSError, ValueError):
+                    self.show(503, '<p>专用执行器尚未就绪</p>')
+                    return
+                self.send_response(200)
+                self.send_header('Content-Length', '0')
+                self.send_header('X-OpenQMS-Test-PR', str(binding['pr']))
+                self.send_header('X-OpenQMS-Test-Version', binding['merge'])
+                self.send_header('X-OpenQMS-Test-Lease', binding['lease'])
+                self.send_header('X-OpenQMS-D4-Binding', binding_fingerprint(binding))
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                return
             role = self.authorize()
             if role is None:
                 return
