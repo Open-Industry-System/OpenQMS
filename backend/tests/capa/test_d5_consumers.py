@@ -51,7 +51,7 @@ async def test_model_path_without_item_recipient_contract_is_unavailable(d5_case
     c = d5_case
     c.report.status = 'D8_GATE_PENDING'
     await c.db.commit()
-    with pytest.raises(PermissionError, match='D5_FULL_MATERIAL_UNAVAILABLE'):
+    with pytest.raises(PermissionError, match='^Restricted report requires manual analysis$'):
         await generate_impact_analysis(c.db, c.report, c.user_id)
 
 
@@ -68,8 +68,12 @@ async def test_d5_business_completeness_requires_real_formal_material(d5_case, c
     else:
         await c.db.execute(delete(CapaD5ProposalSource))
     await c.db.commit()
-    with pytest.raises(ValueError):
+    expected = ValueError if change == 'empty' else PermissionError
+    match = None if change == 'empty' else '^Complete formal sources unavailable$'
+    before_status = c.report.status
+    with pytest.raises(expected, match=match):
         await advance_capa(c.db, c.report, c.user_id)
+    assert c.report.status == before_status
 
 
 @pytest.mark.asyncio
@@ -160,26 +164,53 @@ def qualify_test_vector_namespace(db, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('consumer', ['draft', 'd7-auto-fill', 'ppt-model'])
-async def test_existing_consumers_without_item_acl_refuse_full_material(d5_case, consumer):
+async def test_existing_consumers_without_item_acl_refuse_full_material(d5_case, consumer, monkeypatch):
     c = d5_case
     if consumer == 'draft':
         from fastapi import HTTPException
+        from app.core.permissions import PermissionLevel
         from uuid import uuid4
         from app.schemas.capa_draft import DraftRequest
         from app.services.capa_draft_service import generate_draft
         from app.models.user import User
         from app.core.deps import RequestScope
         from app.core.factory_scope import FactoryScope, ProductLineScope
+        from app.services import capa_d5_measures
+        from app.services.agent import provider_adapter
+        guarded, model_calls = [], []
+        original_guard = capa_d5_measures.require_legacy_d5_only
+        async def observed_guard(db, report_id):
+            guarded.append(report_id)
+            return await original_guard(db, report_id)
+        async def receiver(*args, **kwargs):
+            model_calls.append(args)
+            raise AssertionError('Protected D5 must not reach a model')
+        monkeypatch.setattr(capa_d5_measures, 'require_legacy_d5_only', observed_guard)
+        monkeypatch.setattr(provider_adapter, 'complete_json', receiver)
         actor = await c.db.get(User, c.actors[2].user.user_id)
         scope = RequestScope(user=actor, effective_factory_id=c.report.factory_id,
             factory_scope=FactoryScope([c.report.factory_id], c.report.factory_id),
             pl_scope=ProductLineScope('ALL', None))
+        # A VIEW-only historical reader cannot enter this EDIT action.
+        with pytest.raises(HTTPException) as view_denied:
+            await generate_draft(c.db, c.report.report_id, 'd6',
+                DraftRequest(format='structured', request_id=str(uuid4())),
+                scope.user, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())), scope=scope)
+        assert view_denied.value.status_code == 403
+        assert view_denied.value.detail == 'D4_DRAFT_MATERIAL_UNAVAILABLE'
+        assert guarded == [] and model_calls == []
+        # Grant the real role EDIT to reach the protected material guard.
+        await c.db.execute(update(RolePermission).where(
+            RolePermission.role_id == c.actors[2].role_id, RolePermission.module == 'capa'
+        ).values(permission_level=PermissionLevel.EDIT))
+        await c.db.commit()
         with pytest.raises(HTTPException) as caught:
             await generate_draft(c.db, c.report.report_id, 'd6',
                 DraftRequest(format='structured', request_id=str(uuid4())),
                 scope.user, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())), scope=scope)
         assert caught.value.status_code == 403
-        assert caught.value.detail == 'D5_FULL_MATERIAL_UNAVAILABLE'
+        assert caught.value.detail == 'D4_DRAFT_MATERIAL_UNAVAILABLE'
+        assert guarded == [c.report.report_id] and model_calls == []
         return
     with pytest.raises(PermissionError, match='D5_FULL_MATERIAL_UNAVAILABLE'):
         if consumer == 'd7-auto-fill':

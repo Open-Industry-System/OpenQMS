@@ -71,6 +71,11 @@ async def require_restart_target_source(db, task, authorized_source):
     """Compare the locked target to the already authorized source before touching FMEA."""
     if authorized_source is None or authorized_source.target_report_id != task.target_capa_id:
         raise PermissionError('Recovery unavailable')
+    if authorized_source.derived_projection_id == 'capa.d4.fmea_input.masked.v1':
+        from app.services.capa_d4_candidates import is_d4_task
+        if not await is_d4_task(db,task):
+            raise PermissionError('Recovery unavailable')
+        return authorized_source.fmea_id
     with db.no_autoflush:
         fmea_id = await db.scalar(select(CAPAEightD.fmea_ref_id).where(
             CAPAEightD.report_id == task.target_capa_id))

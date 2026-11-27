@@ -2,7 +2,7 @@
 
 > R4b-2 任务私有附件始终重查当前任务/CAPA VIEW、本人任务身份与工厂/产品线范围；下载不产生直链，操作约束见[附件指南](development/agent-task-attachments.md)。
 
-> 最后更新: 2026-10-29（CAPA 独立冻结结果及外部门禁边界） | 基于代码库权限模型（ModuleKey × PermissionLevel × Role）
+> 最后更新: 2026-11-18（Asia/Shanghai；R6 当前来源继承、正式更正与本地人工闭环权限） | 基于代码库权限模型（ModuleKey × PermissionLevel × Role）
 
 ---
 
@@ -353,3 +353,13 @@ created_by 推断。元数据查询不加载审计私有 before/after，Task 5 �
 **2026-10-29 实际冻结结果（历史）**：1391个源码/配置/测试哈希保持不变；完整 make check 为2 failed /3415 passed /12 skipped /3 xfailed /2 xpassed /5 warnings（make exit2），仅两项强制live用例因无显式 opt-in 失败。该轮次保留为历史失败证据，不是当前结论。
 
 **2026-11-01 当前交接（UTC 收据 2026-10-31）**：授权 TEST profile 经静态白名单和精确 live node 的 setup/call/teardown 作用域完成 Task 7 一条真正 provider/HTTP/D8/Chromium/知识/横向主链及两条保护链（3 passed、5 warnings、exit 0）；独立真实 ClamAV gate 亦通过（process 7、browser controller 1、exit 0）。Task 8 新鲜全量实际 3450 passed /12 skipped /3 xfailed /2 xpassed /5 warnings，make exit0；1390 文件指纹不变，用户删除示例不恢复或提交。既有两项 graph 排除和全部非 pass 保留；scanner 专项不由普通 skip 代替。补充回归及权限/来源/终态证明见最新 PROGRESS 和私有 final-closure report；Task 8/整片已通过最终复核，登记核心容器/专属卷/两测试库已在精确身份与零连接校验后处置，用户profile、用户删除示例、工作树及证据保留，不改变任何权限、自批、默认关闭或生产开放边界。
+
+## R6 CAPA 正式材料、完整来源与安全人工闭环（2026-11-17）
+
+R6 沿用现有 CAPA VIEW / EDIT / APPROVE 和工厂、产品线、对象范围，不增加角色。任务创建、候选/历史/来源详情读取仍要求当前目标与全部实际来源资格；确认 D4、采纳或更正 D5 还要求当前 EDIT。页面已打开后撤销 EDIT、来源、安装或模型部署仍会失败，锁后及返回正文前重验，旧签名、receipt、版本和任务令牌不能代替当前授权。
+
+逐条措施读取/更正只要求该措施的完整实际来源，不为可读 A 暴露不可读 B。整份 Root、正式材料、审批、PPT 或模型交付必须通过实际完整集合；内部全材料版本 HMAC 不返回隐藏来源正文或数量。未知来源拒绝，已捕获受限来源经手工追加、替换、清空及历史读出仍保留，不能靠编辑解除限制。
+
+D4 候选确认独立于验证/证明签发。D5 原始采纳记录不变，正式更正绑定条目版本及材料版本并保留原因、操作者和历史；幂等重试必须沿用原键及原 body，相同版本竞争仅一个成功。待审建议逐项撤回不同于已采纳措施更正。D7 完成后或 D8 待审不能直接更正；沿正常退回重审流程形成新材料。结案/归档冻结核心，旧批准材料 v1 与新 v2 均保持真实身份。
+
+本地人工 D7/D8 不授予 FMEA、知识、供应商等跨模块正文写权。文档影响分析必须真实完成，延期阻塞，豁免沿原权限且只覆盖明确项目；四个传播通道在审批前记为 `NOT_EXECUTED`，不能伪造已执行、发通知或排队传播。switched 后旧推荐/草稿/采纳在服务端拒绝，安全人工编辑需当前入口 epoch 与材料版本；兼容构建、关闭生成开关均不得绕过这些限制。验收范围及发布边界见 [R6 台账](development/r6-entry-switch.md)。

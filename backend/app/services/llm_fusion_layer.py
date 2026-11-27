@@ -23,12 +23,13 @@ class LLMOutcome:
 class LLMFusionLayer:
     """LLM 融合层：为候选生成推荐理由 + 候选不足时回退生成。"""
 
-    def __init__(self, pc, timeout: float | None = None):
+    def __init__(self, pc, timeout: float | None = None, *, db=None):
         # Default to configured LLM_TIMEOUT (not a hardcoded 2s). Stage-11 fusion
         # with local models routinely exceeds 2s; US-E2E-01.2 saw attempted=2/failed=2.
         from app.config import settings
 
         self.pc = pc
+        self.db = db
         self.timeout = float(timeout if timeout is not None else settings.LLM_TIMEOUT)
 
     async def enrich(
@@ -36,6 +37,17 @@ class LLMFusionLayer:
         candidates: list[RecommendationCandidate],
         context: RecommendationContext | None,
     ) -> LLMOutcome:
+        from types import SimpleNamespace
+        from app.services.capa_d4_material import (require_legacy_context,
+            capture_legacy_candidate_bindings, require_legacy_candidate_bindings)
+        actor_id = getattr(context, 'actor_id', None)
+        actor = SimpleNamespace(user_id=actor_id) if actor_id is not None else None
+        bindings = await capture_legacy_candidate_bindings(self.db, candidates, actor=actor) if self.db is not None else ()
+        async def fence():
+            if self.db is not None:
+                await require_legacy_context(self.db, context)
+                await require_legacy_candidate_bindings(self.db, bindings, actor=actor)
+        await fence()
         if self.pc is None:
             return LLMOutcome(candidates=list(candidates) if candidates else [], attempted=0)
 
@@ -50,12 +62,16 @@ class LLMFusionLayer:
                 attempted += 1
                 try:
                     prompt = self._build_fusion_prompt(candidates, context)
+                    await fence()
                     result = await asyncio.wait_for(
-                        provider_adapter.complete_json(self.pc, prompt, {}),
+                        provider_adapter.with_delivery_guard(fence, lambda: provider_adapter.complete_json(self.pc, prompt, {})),
                         timeout=self.timeout,
                     )
+                    await fence()
                     enriched = self._merge_explanations(candidates, result)
                     succeeded += 1
+                except PermissionError:
+                    raise
                 except Exception as e:
                     logger.warning(f"LLM fusion failed: {e}")
                     enriched = list(candidates)
@@ -67,15 +83,22 @@ class LLMFusionLayer:
             if len(enriched) < 3 and context is not None:
                 attempted += 1
                 try:
-                    generated = await self._generate_fallback(context)
+                    await fence()
+                    generated = await provider_adapter.with_delivery_guard(fence, lambda: self._generate_fallback(context))
+                    await fence()
                     enriched.extend(generated)
                     succeeded += 1
+                except PermissionError:
+                    raise
                 except Exception as e:
                     logger.warning(f"LLM fallback generation failed: {e}")
                     failed += 1
+        except PermissionError:
+            raise
         except Exception as e:
             # R4-修复：enrich 硬化为 catch-all，任何未预期异常都不抛，返回带计数的 LLMOutcome
             logger.warning(f"LLM enrich unexpected error (catch-all): {e}")
+            await fence()
             return LLMOutcome(
                 candidates=list(candidates),
                 attempted=attempted,
@@ -83,6 +106,7 @@ class LLMFusionLayer:
                 failed=attempted - succeeded,
             )
 
+        await fence()
         return LLMOutcome(candidates=enriched, attempted=attempted,
                           succeeded=succeeded, failed=failed)
 
@@ -155,6 +179,9 @@ D4 根因: {d4}
     ) -> list[RecommendationCandidate]:
         if not context:
             return []
+        if self.db is not None:
+            from app.services.capa_d4_material import require_legacy_context
+            await require_legacy_context(self.db, context)
         d2 = context.capa_data.get("d2_description", "")
         d4 = context.capa_data.get("d4_root_cause", "")
         stage = context.stage

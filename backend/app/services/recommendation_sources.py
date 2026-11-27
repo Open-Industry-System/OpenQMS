@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from app.services.egress_guard import with_delivery_guard
+
 import uuid
 from typing import Any
 
 from app.services.recommendation_types import RecommendationCandidate, RecommendationContext
+from app.services.capa_d4_material import ordinary_capa_predicate, require_legacy_context
 
 
 def _fmea_risk(node: dict[str, Any] | None) -> dict[str, Any]:
@@ -150,7 +153,10 @@ class SemanticSearchSource:
         if not query_text or not query_text.strip():
             return []
 
-        query_vector = await self.embedding.embed([query_text])
+        await require_legacy_context(self.db, context)
+        query_vector = await with_delivery_guard(lambda: require_legacy_context(self.db, context),
+            lambda: self.embedding.embed([query_text]))
+        await require_legacy_context(self.db, context)
         if not query_vector:
             return []
 
@@ -314,7 +320,10 @@ class HistoricalCAPASource:
         if not d2 or not d2.strip():
             return []
 
-        query_vector = await self.embedding.embed([d2])
+        await require_legacy_context(self.db, context)
+        query_vector = await with_delivery_guard(lambda: require_legacy_context(self.db, context),
+            lambda: self.embedding.embed([d2]))
+        await require_legacy_context(self.db, context)
         if not query_vector:
             return []
 
@@ -374,6 +383,7 @@ class HistoricalCAPASource:
             WHERE de.entity_type = 'capa'
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
+              AND {ordinary_capa_predicate('capa.report_id')}
               {pl_filter}
               {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)
@@ -424,7 +434,10 @@ class HistoricalCAPAMeasureSource:
         if not d4 or not d4.strip():
             return []
 
-        query_vector = await self.embedding.embed([d4])
+        await require_legacy_context(self.db, context)
+        query_vector = await with_delivery_guard(lambda: require_legacy_context(self.db, context),
+            lambda: self.embedding.embed([d4]))
+        await require_legacy_context(self.db, context)
         if not query_vector:
             return []
 
@@ -478,6 +491,7 @@ class HistoricalCAPAMeasureSource:
             WHERE de.entity_type = 'capa'
               AND de.entity_field = :target_field
               AND capa.status = 'D8_CLOSURE'
+              AND {ordinary_capa_predicate('capa.report_id')}
               {pl_filter}
               {factory_filter}
             ORDER BY de.embedding <=> CAST(:query_vector AS vector)

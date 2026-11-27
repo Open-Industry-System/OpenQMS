@@ -35,9 +35,14 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
     )
     if source_factory_id is None:
         raise LookupError("source document not found")
-    ids: set[UUID] = set()
+    from app.models.capa_r6 import CapaR6LocalSource
+    ids: set[UUID] = set(await db.scalars(select(CapaR6LocalSource.report_id).where(CapaR6LocalSource.module == ('planning' if doc_type=='control_plan' else 'fmea'), CapaR6LocalSource.object_id==doc_id)))
 
     if doc_type == "fmea":
+        from app.models.capa_r6 import CapaR6RootRevisionSource, CapaR6SourceOrigin
+        ids.update(await db.scalars(select(CapaR6RootRevisionSource.report_id)
+            .join(CapaR6SourceOrigin, CapaR6SourceOrigin.source_id == CapaR6RootRevisionSource.source_id)
+            .where(CapaR6SourceOrigin.fmea_id == doc_id)))
         from app.models.capa_d5_proposal import CapaD5Measure, CapaD5Proposal, CapaD5ProposalSource
         ids.update(await db.scalars(select(CapaD5Proposal.report_id)
             .join(CapaD5Measure, CapaD5Measure.proposal_id == CapaD5Proposal.proposal_id)
@@ -52,6 +57,8 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
             CapaD7NodeAction.fmea_id == doc_id,
             CapaD7NodeAction.factory_id == source_factory_id,
         )))
+        ids.update(await db.scalars(select(CapaRootCauseVerification.capa_id).where(
+            CapaRootCauseVerification.r6_source_origins.contains([{'fmea_id':str(doc_id)}]))))
         # D4's supported source_ref identity is exactly {fmea_id,cause_node_id}.
         # Extracting text compares malformed JSON safely without UUID casts.
         ids.update(await db.scalars(select(CapaRootCauseVerification.capa_id).where(
@@ -105,7 +112,7 @@ async def _source_capa_ids(db, doc_type: str, doc_id: UUID) -> frozenset[UUID]:
     for source_module in source_modules:
         ids.update(await db.scalars(
             receipt_base.where(
-                AuditLog.changed_fields["outcome_review"]["contract"].astext == "capa.outcome-review.v1",
+                AuditLog.changed_fields["outcome_review"]["contract"].astext.in_(["capa.outcome-review.v1", "capa.outcome-review.v2"]),
                 AuditLog.changed_fields["outcome_review"]["source_versions"].contains([
                     {"module": source_module, "object_id": str(doc_id)}
                 ]),

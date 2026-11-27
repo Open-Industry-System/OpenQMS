@@ -27,6 +27,7 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
     await db.commit()
 
     captured = {}
+    operations = []
 
     class _FakeService:
         def __init__(self, db, graph_repo, llm_timeout=None, embedding=None):
@@ -34,12 +35,16 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
             # Reject llm_provider at construction so the test fails if the route
             # still passes it. (We assert via __init__ signature below instead.)
         async def recommend(self, *args, **kwargs):
+            operations.append("recommend")
             captured["recommend_kwargs"] = kwargs
             from app.schemas.recommendation import RecommendResponse
             return RecommendResponse(
                 suggestions=[], source="rule", cached=False,
                 llm_available=False, graph_match_count=0, effective_scope="current_product_line",
             )
+
+        async def require_current_release(self):
+            operations.append("release")
 
     # Patch the name as bound in the route module's namespace.
     monkeypatch.setattr(fmea_api, "RecommendationService", _FakeService)
@@ -49,6 +54,7 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
     commit_calls = []
     async def _spy_commit():
         commit_calls.append(True)
+        operations.append("commit")
         await real_commit()
     monkeypatch.setattr(db, "commit", _spy_commit)
 
@@ -62,3 +68,7 @@ async def test_recommend_route_passes_tenant_schema_and_commits(
     assert "tenant_schema" in captured["recommend_kwargs"]
     assert captured["recommend_kwargs"]["tenant_schema"] == "public"
     assert len(commit_calls) >= 1, "route must await db.commit() (audit + cache rows depend on it)"
+
+    start, released = operations.index("recommend"), operations.index("release")
+    assert start < released and "commit" in operations[start + 1:released]
+    assert operations[-1] == "release"

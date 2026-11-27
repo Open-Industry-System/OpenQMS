@@ -45,3 +45,7 @@ async def test_no_audit_when_attempted_zero(monkeypatch):
         tenant_schema="t",
     )
     audit.assert_not_called()
+
+
+# Isolate prompt/orchestration units; real DB sessions still use current authority.
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa: F401,E402

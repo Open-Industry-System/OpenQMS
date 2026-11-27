@@ -91,12 +91,16 @@ test('normal-policy local trial creation, readonly recovery and permanent revoke
   await page.getByRole('button', { name: '继续', exact: true }).click();
   await deniedResume;
   const chooser = page.getByRole('combobox', { name: '选择任务' });
+  await expect(chooser).toHaveValue('');
+  await expect(activity).toHaveCount(0);
   await expect(chooser.locator(`option[value="${taskId}"]`)).toBeAttached();
   await chooser.selectOption(taskId);
   await expect(page.getByRole('heading', { name: '只读分析结果', exact: true }).last()).toBeVisible();
-  const deniedHistory = page.waitForResponse(r => r.url().includes(`/api/agent/tasks/${taskId}/activity`) && [401, 403, 404].includes(r.status()));
   await fixture('withdraw');
-  await deniedHistory;
+  const deniedHistory = await page.request.get(`${backend}/api/agent/tasks/${taskId}/activity`, {
+    headers: { Authorization: `Bearer ${login.access_token}`, 'X-Tenant-ID': process.env.AGENT_BROWSER_TENANT! },
+  });
+  expect([403, 404]).toContain(deniedHistory.status());
   await expect(activity).toHaveCount(0);
   await expect(page.getByTestId('agent-activity-window')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '只读分析结果', exact: true })).toHaveCount(0);

@@ -100,6 +100,10 @@ _REQUEST_FIELDS = {
     'save_checkpoint': ({'idempotency_key','receipt_ids'},{'idempotency_key','receipt_ids'}),
     'message_history': ({'after_sequence','limit'},set()),
     'finish': ({'status'},{'status'}),
+    'model_turn': ({'turn'},set()),
+    'model_tool': ({'call_id'},{'call_id'}),
+    'save_d4_checkpoint': (set(),set()),
+    'save_d4_candidate': ({'command_key','text','supporting','opposing','missing_information','operation','predecessor_id','correction_message_id'}, {'command_key','text'}),
 }
 
 
@@ -122,12 +126,32 @@ def _encode(operation, parameters):
             ('after_sequence',str(_integer(p.get('after_sequence',0),0,2**63-1))),
             ('limit',str(_integer(p.get('limit',20),1,20))),
         ))
-    if operation == 'claim':
+    if operation == 'model_turn':
+        body = dict(operation='workflow',turn=_integer(p.get('turn',0),0,8))
+    elif operation == 'model_tool':
+        body = dict(call_id=_text(p['call_id'],1,100))
+    elif operation == 'save_d4_checkpoint':
+        body = {}
+    elif operation == 'claim':
         body = dict(installation_id=str(_uuid(p['installation_id'])), secret=_text(p['secret'],20,200), request_key=_text(p['request_key'],1,100))
     elif operation == 'claim_messages':
         body = dict(limit=_integer(p.get('limit',20),1,20))
     elif operation == 'ack_messages':
         body = dict(batch_id=str(_uuid(p['batch_id'])), through_sequence=_integer(p['through_sequence'],1))
+    elif operation == 'save_d4_candidate':
+        key = _text(p['command_key'],1,128)
+        _require(re.fullmatch(r'[A-Za-z0-9._:-]+', key) is not None, 'invalid_value')
+        text = _text(p['text'],1,16384)
+        _require(text.strip() and len(text.encode('utf-8')) <= 16384 and '\x00' not in text, 'invalid_value')
+        body = dict(command_key=key, text=text, operation=_enum(p.get('operation','save'),('save','alternative','replace')))
+        for name in ('supporting','opposing','missing_information'):
+            body[name] = [_text(item,1,2000) for item in _array(p.get(name,()),0,20,request=True)]
+            _require(all('\x00' not in item and len(item.encode('utf-8')) <= 2000 for item in body[name]), 'invalid_value')
+        predecessor, correction = p.get('predecessor_id'), p.get('correction_message_id')
+        _require((body['operation']=='replace') == (predecessor is not None and correction is not None), 'invalid_value')
+        _require(body['operation']=='replace' or predecessor is None and correction is None, 'invalid_value')
+        if predecessor is not None:
+            body.update(predecessor_id=str(_uuid(predecessor)), correction_message_id=str(_uuid(correction)))
     elif operation == 'finish':
         body = dict(status=_enum(p['status'],('completed','failed')))
     else:
@@ -261,6 +285,27 @@ def _context(p, view, requested_report_id):
 
 def _decode(operation, p, *, view, run_id, task_id, finish_status, report_id):
     _require(type(operation) is str and operation in models.SUPPORTED_OPERATIONS)
+    if operation == 'model_turn':
+        calls=tuple(models.ModelToolCall(_text(item['id'],1,100),_enum(item['name'],('read_inputs','save_candidate','request_supplement'))) for item in _array(p['tool_calls'],0,8))
+        _require(len({item.id for item in calls})==len(calls),'schema')
+        return models.ModelTurn(_text(p['content'],0,65536),calls)
+    if operation == 'model_tool':
+        status=_enum(p['status'],('prepared','saved','waiting','accepted'))
+        candidate=_uuid(p['candidate_id']) if status=='saved' else None
+        sequence=_integer(p['accepted_sequence']) if status=='accepted' else None
+        return models.ModelToolResult(status,candidate,sequence)
+    if operation == 'save_d4_checkpoint':
+        actual_run,actual_task=_uuid(p['run_id']),_uuid(p['task_id'])
+        _require(run_id is None or actual_run==_uuid(run_id),'binding')
+        _require(task_id is None or actual_task==_uuid(task_id),'binding')
+        return models.D4CandidateCheckpoint(_uuid(p['checkpoint_id']),actual_task,actual_run,_integer(p['lease_epoch']),_integer(p['command_watermark']))
+    if operation == 'save_d4_candidate':
+        actual_run, actual_task = _uuid(p['run_id']), _uuid(p['task_id'])
+        _require(run_id is None or actual_run == _uuid(run_id), 'binding')
+        _require(task_id is None or actual_task == _uuid(task_id), 'binding')
+        return models.D4CandidateReference(_uuid(p['candidate_id']), _uuid(p['command_id']),
+            actual_task, actual_run, _uuid(p['report_id']),
+            _enum(p['state'],('pending','adopted','withdrawn','superseded')), _integer(p['version'],1))
     if operation == 'claim':
         claim = models.RunClaim(
             _uuid(p['run_id']),_uuid(p['task_id']),_integer(p['lease_epoch']),
@@ -330,3 +375,25 @@ def decode_response(operation, body, *, view='report', run_id=None, task_id=None
     except (KeyError, ValueError, TypeError, OverflowError):
         kind = 'schema'
     raise ProtocolError(operation, kind=kind) from None
+
+
+def decode_managed_launch(value):
+    """Strict D4-only managed envelope; diagnostics never retain its contents."""
+    kind=None
+    try:
+        _require(type(value) is dict,'invalid_type')
+        fields={'protocol','profile','api_origin','tenant_slug','token','task_id','run_id','deployment_id',
+            'lease_epoch','lease_expires_at','accepted_message_seq','has_resume_checkpoint'}
+        _require(set(value)==fields,'invalid_request')
+        return models.ManagedLaunch(_enum(value['protocol'],('r6.d4.launch.v1',)),
+            _enum(value['profile'],('model_d4_candidate_v1',)), _text(value['api_origin'],1,2048),
+            _text(value['tenant_slug'],1,100), _text(value['token'],1,8192),
+            _uuid(value['task_id']),_uuid(value['run_id']),_uuid(value['deployment_id']),
+            _integer(value['lease_epoch']),_timestamp(value['lease_expires_at']),
+            _integer(value['accepted_message_seq']),_boolean(value['has_resume_checkpoint']))
+    except _Invalid as error:
+        kind=error.kind
+    except (ValueError,TypeError,KeyError,OverflowError):
+        kind='invalid_request'
+    from .errors import ConfigError
+    raise ConfigError('config',kind=kind) from None

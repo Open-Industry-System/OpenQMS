@@ -185,19 +185,22 @@ def test_caddy_serves_api_before_spa_fallback_on_all_required_listeners():
     assert "trusted_proxies" not in caddyfile
 
 
-def test_node_build_heap_leaves_headroom_inside_two_gib_builder():
+def test_frontend_build_keeps_memory_budget_out_of_runtime_image():
     dockerfile = (FRONTEND / "Dockerfile.prod").read_text()
     build_stage, final_stage = dockerfile.split("FROM caddy:2-alpine", maxsplit=1)
     build_stage = build_stage.replace("\\\n", " ")
-    node_env = re.search(r"(?m)^ENV (NODE_OPTIONS=.*)$", build_stage)
-    assert node_env is not None, "build stage must set NODE_OPTIONS"
-    node_assignment = shlex.split(node_env.group(1))[0]
-    node_options = node_assignment.split("=", maxsplit=1)[1]
+    build_env = re.search(r"(?m)^ENV (NODE_OPTIONS=.*)$", build_stage)
+    assert build_env is not None, "build stage must set its memory budget"
+    budget = dict(assignment.split("=", maxsplit=1) for assignment in shlex.split(build_env.group(1)))
+    node_options = budget["NODE_OPTIONS"]
     heap = re.search(r"(?:^|\s)--max-old-space-size=(\d+)(?:\s|$)", node_options)
-    assert heap is not None, "Node build must explicitly bound its heap"
-    heap_mib = int(heap.group(1))
-    assert heap_mib > 0
-    assert 2048 - heap_mib >= 512, "reserve at least 512 MiB for native/nonheap allocations"
-    assert build_stage.index("RUN npm ci") < build_stage.index("COPY frontend/ ./") < node_env.start()
-    assert node_env.end() < build_stage.index('RUN if [ "$VITE_PUBLIC_DEMO_ENABLED"')
-    assert "NODE_OPTIONS" not in final_stage
+    semi_space = re.search(r"(?:^|\s)--max-semi-space-size=(\d+)(?:\s|$)", node_options)
+    go_memory = re.fullmatch(r"(\d+)MiB", budget.get("GOMEMLIMIT", ""))
+
+    assert heap is not None and 0 < int(heap.group(1)) <= 1408
+    assert semi_space is not None and 0 < int(semi_space.group(1)) <= 8
+    assert go_memory is not None and 0 < int(go_memory.group(1)) <= 128
+    assert budget.get("GOMAXPROCS") == "2"
+    assert build_stage.index("RUN npm ci") < build_stage.index("COPY frontend/ ./") < build_env.start()
+    assert build_env.end() < build_stage.index('RUN if [ "$VITE_PUBLIC_DEMO_ENABLED"')
+    assert all(name not in final_stage for name in ("NODE_OPTIONS", "GOMEMLIMIT", "GOMAXPROCS"))

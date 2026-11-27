@@ -5,7 +5,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-class D5Command(BaseModel):
+from app.schemas.database_text import DatabaseTextInput
+
+class D5Command(DatabaseTextInput):
     model_config = ConfigDict(extra='forbid')
     command_key: str = Field(min_length=1, max_length=128, pattern=r'^[A-Za-z0-9._:-]+$')
     operation: Literal['save', 'alternative', 'replace'] = 'save'

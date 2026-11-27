@@ -9,7 +9,7 @@ from app.config import settings
 from app.core.tenant_transaction import TenantBinding, TenantUnavailable, bind_business_transaction
 from app.core.tenant_utils import current_tenant_binding, current_tenant_schema
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
+engine = create_async_engine(settings.DATABASE_URL, echo=False, hide_parameters=True)
 # This public factory is for platform control-plane queries and single-tenant mode.
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

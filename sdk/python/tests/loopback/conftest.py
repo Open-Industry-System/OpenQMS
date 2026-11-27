@@ -82,7 +82,7 @@ def serve(owned_loopback_only):
                         if not piece:
                             return
                         body += piece
-                    requests.append(bytes(request))
+                    requests.append(head + b'\r\n\r\n' + body)
                     for delay, chunk in parts:
                         if stop.wait(delay):
                             return

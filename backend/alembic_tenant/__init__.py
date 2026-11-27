@@ -19,7 +19,7 @@ REVIEWED_REVISIONS = (
     "tv001_business_snapshot", "tv002_agent_task_core", "tv003_agent_readonly_delivery",
     "tv004_agent_readonly_controls", "tv005_agent_task_attachments", "tv006_agent_read_tasks",
     "tv007_characteristic_refs", "tv007_d4_text_delivery", "tv008_d4_recovery", "tv009_r4b_main_merge",
-    "tv010_refresh_sessions", "tv010_r5_d5_proposals", "tv011_r5_d5_basis", "tv012_r5_models", "tv013_r5_main_merge", "tv014_r5_responses",
+    "tv010_refresh_sessions", "tv010_r5_d5_proposals", "tv011_r5_d5_basis", "tv012_r5_models", "tv013_r5_main_merge", "tv014_r5_responses", "tv015_r6_entry_contracts", "tv016_r6_source_epoch", "tv017_r6_d4_inputs", "tv018_r6_d4_withdraw", "tv019_r6_verify_origins", "tv020_r6_local_closure", "tv021_r6_manual_receipts", "tv022_r6_local_snapshot", "tv023_r6_legacy_capture", "tv024_r6_local_capa_sources",
 )
 
 

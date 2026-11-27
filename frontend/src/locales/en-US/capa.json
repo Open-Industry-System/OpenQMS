@@ -480,7 +480,11 @@
     "d7": "D7 action records",
     "gate": {
       "title": "Document gate decision",
-      "decision": { "passed": "Passed", "blocked": "Blocked", "deferred": "Deferred" },
+      "decision": {
+        "passed": "Passed",
+        "blocked": "Blocked",
+        "deferred": "Deferred"
+      },
       "decisionId": "Gate decision ID",
       "revision": "Gate revision",
       "decidedBy": "Decided by",
@@ -541,5 +545,15 @@
       "passed": "Verification passed",
       "failed": "Verification failed"
     }
+  },
+  "r6": {
+    "candidateTitle": "D4 root cause candidates · Employee confirmation",
+    "sourceTitle": "Controlled source details",
+    "measureTitle": "Formal D5 corrections and history",
+    "localTitle": "Local closure · Manual document gate",
+    "localPpt": "Export local rules PPT (model not run)",
+    "localPptDone": "Local rules PPT exported; model review was not run.",
+    "localReviewTitle": "Local closure and propagation for this review",
+    "localReviewNote": "Manual analysis is recorded separately; propagation channels were explicitly not executed in this review."
   }
 }

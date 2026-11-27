@@ -3,7 +3,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, text, literal_column
 
 from app.models.fmea import FMEADocument
 from app.models.audit import AuditLog
@@ -89,7 +89,14 @@ async def test_malformed_json_references_do_not_crash_or_false_match(review_case
     doc_id = review_sources.identity(doc_type)
     async with review_case.session_factory() as db:
         verification = await db.get(CapaRootCauseVerification, review_case.verification_id)
-        verification.source_ref = malformed
+        # Simulate an untouched pre19 row; current19 rejects malformed refs.
+        await db.execute(text('ALTER TABLE capa_root_cause_verification DISABLE TRIGGER r6_retain_verification_origins'))
+        try:
+            verification.source_ref = malformed
+            verification.r6_source_origins = literal_column('NULL')
+            await db.flush()
+        finally:
+            await db.execute(text('ALTER TABLE capa_root_cause_verification ENABLE TRIGGER r6_retain_verification_origins'))
         decision = await db.scalar(select(CapaDocgDecision).where(CapaDocgDecision.analysis_id == review_case.owned_ids["analysis_id"]))
         decision.version_snapshot = malformed
         for shape in [None, [], "bad", {"module": [], "object_id": "not-a-uuid"},

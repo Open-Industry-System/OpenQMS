@@ -94,12 +94,13 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
     from app.services.agent_runtime import model_egress
     r5 = await model_egress.is_r5_task(db, task)
     if r5:
-        await model_egress.task_deployment(db, task)
+        deployment = await model_egress.task_deployment(db, task)
+        expected_profile = model_egress.deployment_profile(deployment)
     trial = task_service.trial_for_target(db, installation, task.executor_user_id, target)
-    if r5 and (trial is None or trial.profile != model_egress.R5_PROFILE):
+    if r5 and (trial is None or trial.profile != expected_profile):
         raise PermissionError(run_auth.INVALID_TOKEN)
     profile = "baseline" if trial is None else trial.profile
-    current_source = await current_source_for_target(db, placeholder, target) if profile in {'local_d4_root_cause_text_v1', 'model_d5_proposal_v1'} else None
+    current_source = await current_source_for_target(db, placeholder, target) if profile in {'local_d4_root_cause_text_v1', 'model_d5_proposal_v1', 'model_d5_proposal_r6_v1'} else None
     with db.no_autoflush:
         plugin_sources = list((await db.scalars(select(AgentPluginDerivedSourceScope).where(
             AgentPluginDerivedSourceScope.plugin_grant_id.in_([row.grant_id for row in plugins]))
@@ -112,6 +113,17 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
             .where(D4TaskParentGrant.task_grant_id.in_([row.grant_id for row in tasks])))).all()) if current_source or r5 else {}
     p_scopes = {row.plugin_grant_id: scope_from_row(row) for row in plugin_sources}
     t_scopes = {row.task_grant_id: scope_from_row(row) for row in task_sources}
+    if profile == model_egress.D4_PROFILE:
+        from app.services.agent_runtime.derived_source_grants import validate_d4_input_source
+        from types import SimpleNamespace
+        candidates = {source for source in t_scopes.values() if source is not None
+            and source.derived_projection_id == 'capa.d4.fmea_input.masked.v1'
+            and source.target_report_id == task.target_capa_id}
+        if len(candidates) != 1:
+            raise PermissionError(run_auth.INVALID_TOKEN)
+        selected = candidates.pop()
+        current_source = await validate_d4_input_source(db, placeholder, target,
+            SimpleNamespace(target_report_id=selected.target_report_id, fmea_id=selected.fmea_id, cause_node_id=selected.cause_node_id))
     basis_available = current_source is not None
     if r5 and current_source is None:
         # R5 chat can survive an absent/obsolete proof, but source permissions
@@ -146,14 +158,14 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
                 raise PermissionError(run_auth.INVALID_TOKEN)
             continue  # only server-owned canonical specs belong in the response
         allowed = False
-        if (spec.kind == "context" or profile == "model_d5_proposal_v1" and spec.kind == "command") and spec.approval_floor == ApprovalFloor.DIRECT:
+        if (spec.kind == "context" or profile in {"model_d5_proposal_v1", "model_d5_proposal_r6_v1", "model_d4_candidate_v1"} and spec.kind == "command") and spec.approval_floor == ApprovalFloor.DIRECT:
             for plugin in plugins:
                 if plugin.capability_id != capability:
                     continue
                 for grant in tasks:
                     if grant.capability_id != capability:
                         continue
-                    if capability == TEXT_CAPABILITY and parents.get(grant.grant_id) != plugin.grant_id:
+                    if capability in {TEXT_CAPABILITY, 'capa.d4.fmea_input.masked.v1'} and parents.get(grant.grant_id) != plugin.grant_id:
                         continue
                     decision = authorize(AccessAttempt(spec, levels,
                         None if factories.accessible_factory_ids is None else frozenset(factories.accessible_factory_ids),
@@ -165,7 +177,7 @@ async def authorize_task(db: AsyncSession, task: AgentTask,
                         task_source_scope=t_scopes.get(grant.grant_id)))
                     accepted = decision.allowed and decision.approval_floor == ApprovalFloor.DIRECT
                     allowed = allowed or accepted
-                    if accepted and capability == TEXT_CAPABILITY:
+                    if accepted and capability in {TEXT_CAPABILITY, 'capa.d4.fmea_input.masked.v1'}:
                         source_grant_pairs.append((plugin.grant_id, grant.grant_id))
         decisions.append(RuntimeCapability(id=capability, allowed=allowed,
             required=capability in required, projection=spec.projection if spec.projection in {"masked", "raw"} else None))
@@ -196,6 +208,8 @@ async def verify_runtime_identity(db: AsyncSession, token: str,
     claims = run_auth._claims(token)
     if claims.get("trial_binding_sha256") != (None if authority.trial is None else authority.trial.binding_sha256):
         raise PermissionError(run_auth.INVALID_TOKEN)
+    from app.services.capa_d4_candidates import authorize_task_history
+    await authorize_task_history(db, task.executor_user_id, task)
     return RuntimeIdentity(task, run, installation, binding, authority.scope, authority.capabilities,
         authority.target_product_line_code, token, authority.trial)
 

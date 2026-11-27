@@ -3,7 +3,7 @@
 _SAFE_OPERATIONS = frozenset({
     "unknown", "config", "claim", "capabilities", "claim_messages", "ack_messages",
     "capa_context", "record_event", "save_result", "save_checkpoint",
-    "message_history", "finish", "close",
+    "message_history", "finish", "close", "save_d4_candidate", "model_turn", "model_tool", "save_d4_checkpoint",
 })
 _SAFE_KINDS = frozenset({
     "unknown", "invalid_config", "invalid_timeout", "invalid_response_budget",

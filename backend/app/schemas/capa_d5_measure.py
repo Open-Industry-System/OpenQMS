@@ -18,9 +18,15 @@ class D5ProposalItem(BaseModel):
 
 
 class D5MeasureItem(BaseModel):
+    can_correct: bool = False
     measure_id: UUID
     proposal_id: UUID
     final_text: str
+    adopted_text: str
+    current_version: str
+    material_version: str
+    correction_revision_id: UUID | None = None
+    correction_revision_no: int = 0
     adopted_by: UUID
     adopted_at: datetime
 

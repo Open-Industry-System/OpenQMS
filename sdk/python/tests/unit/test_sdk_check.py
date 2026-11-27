@@ -69,27 +69,33 @@ def test_execute_reclaims_actual_process_tree(tmp_path, early_exit, ignore_term)
         code = check.execute([sys.executable, '-I', '-B', '-c', child, grandchild,
                               str(heartbeat), str(stopped), str(identity), str(early_exit),
                               str(ignore_term)],
-                             tmp_path, env, timeout=1)
+                             tmp_path, env, timeout=5 if early_exit else 1)
         pids = json.loads(identity.read_text())
         assert code == (0 if early_exit else 124)
         if not ignore_term:
             assert stopped.exists(), pids
-        before = heartbeat.read_text()
-        time.sleep(.1)
-        assert heartbeat.read_text() == before, pids
         assert pids['pgid'] == pids['child'] != os.getpgrp()
         with pytest.raises(ChildProcessError):
             os.waitpid(pids['child'], os.WNOHANG)
-        # Record PID/state and stopped heartbeat evidence only in this test's own tmp.
-        state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pids['grandchild'])],
-                               capture_output=True, text=True, check=False)
-        assert state.returncode in (0, 1)
-        assert not state.stdout.strip() or state.stdout.strip().startswith('Z')
+        # Delivery of SIGKILL is asynchronous for the orphaned grandchild.
+        deadline = time.monotonic() + 2
+        while True:
+            state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pids['grandchild'])],
+                                   capture_output=True, text=True, check=False)
+            assert state.returncode in (0, 1)
+            grandchild_state = state.stdout.strip()
+            if not grandchild_state or grandchild_state.startswith('Z'):
+                break
+            assert time.monotonic() < deadline, (pids, grandchild_state)
+            time.sleep(.02)
+        before = heartbeat.read_text()
+        time.sleep(.1)
+        assert heartbeat.read_text() == before, pids
         cleaned = True
         (tmp_path / 'cleanup-evidence.json').write_text(json.dumps(
             dict(pids, exit=code, ignore_term=ignore_term, heartbeat=before,
                  heartbeat_stopped=True, direct_child_reaped=True,
-                 grandchild_state=state.stdout.strip())))
+                 grandchild_state=grandchild_state)))
     finally:
         if identity.exists() and not cleaned:
             pid = json.loads(identity.read_text())['grandchild']

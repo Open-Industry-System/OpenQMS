@@ -77,7 +77,7 @@ async def test_explicit_legacy_bootstrap_supersede_and_update_never_revives(proo
     assert len(proofs) == 1
     old = proofs[0]
     revision = await c.db.get(CapaD4RootCauseRevision, old.revision_id)
-    assert revision.revision_no == 1 and revision.write_path == 'initial_revision_observed'
+    assert revision.revision_no == 1 and revision.write_path == 'r6:initial_revision_observed'
     assert old.tenant_generation == c.binding.generation
     assert old.factory_id == c.report.factory_id and old.product_line_code == c.report.product_line_code
     assert old.cause_node_id == 'cause-1' and old.declaration_kind == 'employee_declared_complete_v1'

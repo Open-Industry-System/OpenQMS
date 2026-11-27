@@ -4,7 +4,7 @@ from app.schemas.capa_d5_staff import D5Adopt, D5Withdraw
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, Body
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
@@ -229,14 +229,18 @@ async def list_capas(
     elif scope.pl_scope.mode == "EXPLICIT":
         allowed_pls = scope.pl_scope.codes
 
-    items, total = await capa_service.list_capas(
-        db, page, page_size, status, product_line,
-        overdue=overdue, pending_action=pending_action,
-        allowed_product_line_codes=allowed_pls,
-        factory_id=scope.effective_factory_id,
-    )
+    try:
+        items, total = await capa_service.list_capas(
+            db, page, page_size, status, product_line,
+            overdue=overdue, pending_action=pending_action,
+            allowed_product_line_codes=allowed_pls,
+            factory_id=scope.effective_factory_id,
+            actor_id=scope.user.user_id,
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     return CAPAListResponse(
-        items=[CAPAResponse.model_validate(c) for c in items],
+        items=[await _capa_response_with_projections(db, c, scope.user.user_id) for c in items],
         total=total,
         page=page,
         page_size=page_size,
@@ -389,12 +393,47 @@ async def capa_capabilities(
     }
 
 
-async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) -> CAPAResponse:
+async def _authorize_capa_root(db, scope, report_id, *, allow_controlled=True):
+    from app.services.capa_d4_material import authorize_root, require_legacy_root_only
+    try:
+        authority = await authorize_root(db, scope.user.user_id, report_id)
+        from app.services.capa_legacy_capture import authorize_bound_sources
+        await authorize_bound_sources(db,scope.user.user_id,report_id,d_step="d5")
+        if not allow_controlled:
+            await require_legacy_root_only(db, report_id)
+        return authority
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
+    except LookupError:
+        raise HTTPException(status_code=404, detail="8D report not found") from None
+
+
+async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD, actor_id=None, *, material_fence=None, fresh=False) -> CAPAResponse:
     """Build CAPAResponse with scar / d3 lots / supplier_risk_input / supplier label projections."""
-    resp = CAPAResponse.model_validate(capa)
+    from app.services.capa_d4_material import read_root
+    from app.services.capa_legacy_capture import authorize_bound_sources
+    if actor_id is None:
+        raise PermissionError("Current actor required")
+    try:
+        root = await read_root(db, actor_id, capa.report_id)
+        await authorize_bound_sources(db, actor_id, capa.report_id, d_step='d5')
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
+    values = {name: getattr(capa, name) for name in CAPAResponse.model_fields
+              if name != "d4_root_cause" and hasattr(capa, name)}
+    values["d4_root_cause"] = root
+    from app.services.capa_d4_material import material_version
+    projection_version=material_fence if material_fence is not None else await material_version(db,capa.report_id)
+    from app.services.capa_r6_local_closure import prevention_text
+    values["d7_prevention"] = await prevention_text(db,actor_id,capa.report_id,values.get("d7_prevention"))
+    resp = CAPAResponse.model_validate(values)
+    resp.material_version = projection_version
+    from app.services.capa_entry_switch import status as entry_status
+    entry = await entry_status(db)
+    resp.entry_phase, resp.entry_epoch = entry.state, entry.epoch
     linked = None
     if capa.scar_ref_id is not None:
-        scar = await db.get(SupplierSCAR, capa.scar_ref_id)
+        scar = await db.get(SupplierSCAR, capa.scar_ref_id, populate_existing=fresh)
         if scar is not None:
             linked = LinkedScarSchema(
                 scar_id=scar.scar_id,
@@ -402,13 +441,13 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
                 status=scar.status,
                 supplier_id=scar.supplier_id,
             )
-    lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id)
+    lots = await capa_scar_service.load_d3_affected_lots(db, capa.report_id, fresh=fresh)
 
     supplier_no = None
     supplier_name = None
     if capa.supplier_id is not None:
         from app.models.supplier import Supplier
-        sup = await db.get(Supplier, capa.supplier_id)
+        sup = await db.get(Supplier, capa.supplier_id, populate_existing=fresh)
         if sup is not None:
             # Scope: only expose label if same factory (row already CAPA-scoped)
             if sup.factory_id == capa.factory_id:
@@ -422,12 +461,13 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
     inp = (
         await db.execute(
             select(SupplierRiskCapaInput).where(SupplierRiskCapaInput.capa_id == capa.report_id)
+            .execution_options(populate_existing=fresh)
         )
     ).scalar_one_or_none()
     if inp is not None:
         linked_alert = None
         if inp.linked_alert_id is not None:
-            alert = await db.get(SupplierRiskAlert, inp.linked_alert_id)
+            alert = await db.get(SupplierRiskAlert, inp.linked_alert_id, populate_existing=fresh)
             if alert is not None:
                 linked_alert = {
                     "alert_id": str(alert.alert_id),
@@ -449,8 +489,15 @@ async def _capa_response_with_projections(db: AsyncSession, capa: CAPAEightD) ->
         )
 
     from app.services.capa_lateral_diffusion_service import _build_projection
-    lateral_diffusion = await _build_projection(db, capa.report_id)
+    lateral_diffusion = await _build_projection(db, capa.report_id, fresh=fresh)
 
+    try:
+        resp.d4_root_cause = await read_root(db, actor_id, capa.report_id)
+        await authorize_bound_sources(db, actor_id, capa.report_id, d_step='d5')
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
+    if projection_version!=await material_version(db,capa.report_id):
+        raise HTTPException(status_code=409,detail='CAPA_MATERIAL_CHANGED',headers={'Cache-Control':'no-store'})
     return resp.model_copy(
         update={
             "scar_ref_id": capa.scar_ref_id,
@@ -496,14 +543,30 @@ async def get_capa(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    level = await get_user_permission(scope.user, Module.CAPA, db)
-    if level < PermissionLevel.VIEW:
-        raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
-    capa = await capa_service.get_capa(db, report_id)
-    if capa is None or not is_factory_visible(capa.factory_id, scope):
-        raise HTTPException(status_code=404, detail="8D report not found")
-    check_product_line_access(capa.product_line_code, scope)
-    return await _capa_response_with_projections(db, capa)
+    from app.services.capa_d4_material import material_version
+    for attempt in range(2):
+        level = await get_user_permission(scope.user, Module.CAPA, db)
+        if level < PermissionLevel.VIEW:
+            raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+        await _authorize_capa_root(db, scope, report_id)
+        # Fence every body read, including the report itself. A retry refreshes
+        # only projected business rows; actor/scope objects are never expired.
+        before = await material_version(db, report_id)
+        report = await capa_service.get_capa(db, report_id, fresh=True)
+        if report is None or not is_factory_visible(report.factory_id, scope):
+            raise HTTPException(status_code=404, detail="8D report not found")
+        check_product_line_access(report.product_line_code, scope)
+        try:
+            result = await _capa_response_with_projections(db, report, scope.user.user_id,
+                material_fence=before, fresh=True)
+            # Root-only authorization omits known legacy D5-only sources.
+            await _authorize_capa_root(db, scope, report_id)
+            if before != await material_version(db, report_id):
+                raise HTTPException(409, 'CAPA_MATERIAL_CHANGED', headers={'Cache-Control':'no-store'})
+            return result
+        except HTTPException as exc:
+            if attempt or exc.status_code != 409 or exc.detail != 'CAPA_MATERIAL_CHANGED':
+                raise
 
 
 @router.post("/{report_id}/trigger-scar", response_model=scar_schemas.SCARResponse)
@@ -528,6 +591,8 @@ async def trigger_scar(
             due_date=body.due_date,
             affected_batches=body.affected_batches,
         )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     except LookupError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -554,7 +619,11 @@ async def confirm_repeat(
     from app.services.supplier_risk.exceptions import SupplierRiskConfigurationError
     from app.services.supplier_risk.service import evaluate_supplier_risk_in_tx
 
-    # Lock order: capa → input (design §5.4)
+    # Lock order: capa → input (design §5.4). Lock metadata before body.
+    await _authorize_capa_root(db, scope, report_id)
+    await db.scalar(select(CAPAEightD.report_id).where(
+        CAPAEightD.report_id == report_id).with_for_update())
+    await _authorize_capa_root(db, scope, report_id)
     capa = (
         await db.execute(
             select(CAPAEightD)
@@ -616,7 +685,7 @@ async def confirm_repeat(
     )
     await db.commit()
     await db.refresh(capa)
-    return await _capa_response_with_projections(db, capa)
+    return await _capa_response_with_projections(db, capa, scope.user.user_id)
 
 
 @router.put("/{report_id}", response_model=CAPAResponse)
@@ -629,6 +698,7 @@ async def update_capa(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -650,7 +720,7 @@ async def update_capa(
         raise HTTPException(status_code=404, detail="8D report not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return await _capa_response_with_projections(db, capa)
+    return await _capa_response_with_projections(db, capa, scope.user.user_id)
 
 
 async def require_advance_permission(
@@ -661,9 +731,11 @@ async def require_advance_permission(
 ) -> tuple[RequestScope, Any]:
     actor_id = uuid.UUID(str(scope.user.user_id))
     try:
+        from app.services.capa_d4_material import authorize_root
+        await authorize_root(db, actor_id, report_id, PermissionLevel.EDIT)
         capa = await current_capa_actor_target(db, actor_id, report_id, PermissionLevel.EDIT)
         from app.services.capa_review_guard import lock_capa_parent
-        capa = await lock_capa_parent(db, report_id)
+        capa = await lock_capa_parent(db, report_id, actor_id=actor_id)
     except PermissionError:
         raise HTTPException(status_code=403, detail="编辑权限不足")
     except LookupError:
@@ -720,6 +792,8 @@ async def advance_capa(
         raise HTTPException(status_code=403, detail="CAPA_OUTCOME_REVIEW_ACCESS_DENIED")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     except KnowledgeSinkBlockedError as e:
         raise HTTPException(
             status_code=422,
@@ -763,7 +837,7 @@ async def advance_capa(
     if from_status == EightDState.D4_ROOT_CAUSE.value and (capa.d4_retry_count or 0) >= D4_RETRY_THRESHOLD:
         warning = "建议升级处理（D4 验证已回退 {} 次）".format(capa.d4_retry_count)
     return CAPAAdvanceResponse(
-        capa=await _capa_response_with_projections(db, capa),
+        capa=await _capa_response_with_projections(db, capa, scope.user.user_id),
         warning=warning,
     )
 
@@ -780,6 +854,7 @@ async def link_fmea(
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -797,7 +872,7 @@ async def link_fmea(
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
-    return await _capa_response_with_projections(db, capa)
+    return await _capa_response_with_projections(db, capa, scope.user.user_id)
 
 
 @router.get("/{report_id}/related-fmea")
@@ -810,6 +885,7 @@ async def get_related_fmea(
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = (
         await db.execute(
             select(CAPAEightD).where(CAPAEightD.report_id == report_id)
@@ -857,6 +933,7 @@ async def get_d7_fmea_recommendations(
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -915,10 +992,18 @@ async def get_d4_fmea_recommendations(
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    from app.services.capa_entry_switch import admit
+    await admit(db, 'legacy')
+    from app.services.capa_d4_material import require_legacy_root_only
+    try:
+        await require_legacy_root_only(db, report_id)
+    except PermissionError:
+        raise HTTPException(403, "D4_MATERIAL_UNAVAILABLE") from None
 
     allowed_pls = _resolve_allowed_pls(scope)
     if allowed_pls is not None and not allowed_pls:
@@ -939,7 +1024,7 @@ async def get_d4_fmea_recommendations(
     # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code, "factory_id": str(f.factory_id), "lock_version": f.lock_version}
         for f in fmea_result.scalars().all()
     ]
 
@@ -976,14 +1061,24 @@ async def get_d4_fmea_recommendations(
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(
-        context,
-        user=scope.user,
-        report_id=report_id,
-        factory_id=capa.factory_id,
-        tenant_schema=tenant_schema(request),
-    )
+    try:
+        result = await pipeline.recommend(
+            context,
+            user=scope.user,
+            report_id=report_id,
+            factory_id=capa.factory_id,
+            tenant_schema=tenant_schema(request),
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     await db.commit()
+    await _authorize_capa_root(db, scope, report_id)
+    await admit(db, "legacy")
+    from app.services.capa_d4_material import require_legacy_candidate_bindings
+    try:
+        await require_legacy_candidate_bindings(db, result.source_bindings, actor=scope.user)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     if result.blocked:
         raise HTTPException(
             status_code=422,
@@ -1010,10 +1105,18 @@ async def get_d5_fmea_recommendations(
     if fmea_level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 FMEA 模块的 VIEW 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    from app.services.capa_entry_switch import admit
+    await admit(db, 'legacy')
+    from app.services.capa_d4_material import require_legacy_root_only
+    try:
+        await require_legacy_root_only(db, report_id)
+    except PermissionError:
+        raise HTTPException(403, "D4_MATERIAL_UNAVAILABLE") from None
 
     allowed_pls = _resolve_allowed_pls(scope)
     if allowed_pls is not None and not allowed_pls:
@@ -1034,7 +1137,7 @@ async def get_d5_fmea_recommendations(
     # admin (allowed_pls=None): load all FMEA docs
     fmea_result = await db.execute(fmea_query)
     fmea_docs = [
-        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code}
+        {"fmea_id": f.fmea_id, "document_no": f.document_no, "graph_data": f.graph_data, "product_line_code": f.product_line_code, "factory_id": str(f.factory_id), "lock_version": f.lock_version}
         for f in fmea_result.scalars().all()
     ]
 
@@ -1071,14 +1174,24 @@ async def get_d5_fmea_recommendations(
         linked_fmea=linked_fmea,
     )
 
-    result = await pipeline.recommend(
-        context,
-        user=scope.user,
-        report_id=report_id,
-        factory_id=capa.factory_id,
-        tenant_schema=tenant_schema(request),
-    )
+    try:
+        result = await pipeline.recommend(
+            context,
+            user=scope.user,
+            report_id=report_id,
+            factory_id=capa.factory_id,
+            tenant_schema=tenant_schema(request),
+        )
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     await db.commit()
+    await _authorize_capa_root(db, scope, report_id)
+    await admit(db, "legacy")
+    from app.services.capa_d4_material import require_legacy_candidate_bindings
+    try:
+        await require_legacy_candidate_bindings(db, result.source_bindings, actor=scope.user)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     if result.blocked:
         raise HTTPException(
             status_code=422,
@@ -1112,6 +1225,7 @@ async def draft_capabilities(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if not capa:
         raise HTTPException(status_code=404, detail="CAPA 报告不存在")
@@ -1136,8 +1250,11 @@ async def draft_capabilities(
         "D8_APPROVAL_PENDING": [],
     }
 
+    from app.services.capa_entry_switch import status as entry_status
+    phase = (await entry_status(db)).state
     return {
-        "available_steps": status_to_steps.get(current_status, []),
+        "available_steps": [step for step in status_to_steps.get(current_status, [])
+            if step not in {"d4", "d5"} or phase == "legacy"],
         "current_step": current_status,
     }
 
@@ -1173,6 +1290,7 @@ async def get_capa_lessons(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa_doc = await capa_service.get_capa(db, report_id)
     if capa_doc is None:
         raise HTTPException(status_code=404, detail="CAPA not found")
@@ -1184,12 +1302,16 @@ async def get_capa_lessons(
 
     embedding = getattr(request.app.state, "embedding_provider", None)
     service = LessonsLearnedService(db, embedding)
-    result = await service.recommend(
-        report_id, "capa", req.problem_description if req else None, scope.user,
-        skip_fmea_sources=not has_fmea_view,
-    )
-    await db.commit()
-    return result
+    try:
+        result = await service.recommend(
+            report_id, "capa", req.problem_description if req else None, scope.user,
+            skip_fmea_sources=not has_fmea_view,
+        )
+        await db.commit()
+        await service.require_current_release()
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE", headers={'Cache-Control': 'no-store'}) from None
+    return JSONResponse(content=jsonable_encoder(result), headers={'Cache-Control': 'no-store'})
 
 
 @router.post("/{report_id}/adopt-recommendation", response_model=AdoptResponse)
@@ -1200,10 +1322,13 @@ async def adopt_recommendation_ep(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
+    from app.services.capa_entry_switch import admit
+    await admit(db, 'legacy')
     check_product_line_access(capa.product_line_code, scope)
     try:
         adoption, field_value = await capa_verification_service.adopt_recommendation(db, capa, req, scope.user)
@@ -1211,10 +1336,26 @@ async def adopt_recommendation_ep(
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    await _authorize_capa_root(db, scope, report_id)
     return AdoptResponse(adoption_id=adoption.adoption_id, d_step=req.d_step, field_value=field_value)
 
 
-@router.post("/{report_id}/root-cause-verifications", response_model=VerificationCreatedResponse)
+from app.schemas.capa_verification import VerificationSourceResponse, VerificationCreatedSourceResponse
+
+async def _verification_source_response(db,scope,report_id,rec,created=False):
+    from app.services.capa_verification_sources import known_origins,authorize_verifications
+    try:
+        await authorize_verifications(db,report_id,actor_id=scope.user.user_id)
+        origins=await known_origins(db,report_id,rec.verification_id)
+        response=(VerificationCreatedSourceResponse if created else VerificationSourceResponse).model_validate({
+            **VerificationCreatedResponse.model_validate(rec).model_dump(),
+            'known_source_origins':origins[rec.verification_id][1]})
+        await authorize_verifications(db,report_id,actor_id=scope.user.user_id)
+        return response
+    except PermissionError:
+        raise HTTPException(403,'Verification source unavailable') from None
+
+@router.post("/{report_id}/root-cause-verifications", response_model=VerificationCreatedSourceResponse)
 async def create_verification_ep(
     report_id: uuid.UUID, req: VerificationCreate, request: Request,
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
@@ -1222,6 +1363,7 @@ async def create_verification_ep(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1239,10 +1381,11 @@ async def create_verification_ep(
         raise HTTPException(status_code=404, detail="目标 FMEA 不存在")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return VerificationCreatedResponse.model_validate(rec)
+    await _authorize_capa_root(db, scope, report_id)
+    return await _verification_source_response(db,scope,report_id,rec,created=True)
 
 
-@router.get("/{report_id}/root-cause-verifications", response_model=list[VerificationResponse])
+@router.get("/{report_id}/root-cause-verifications", response_model=list[VerificationSourceResponse])
 async def list_verifications_ep(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
@@ -1250,16 +1393,22 @@ async def list_verifications_ep(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
     check_factory_access(capa.factory_id, scope)
     check_product_line_access(capa.product_line_code, scope)
-    items = await capa_verification_service.list_verifications(db, capa)
-    return [VerificationResponse.model_validate(i) for i in items]
+    try:
+        items = await capa_verification_service.list_verifications(db, capa, actor_id=scope.user.user_id)
+    except PermissionError:
+        await db.rollback()
+        raise HTTPException(status_code=403, detail='Verification source unavailable') from None
+    await _authorize_capa_root(db, scope, report_id)
+    return [await _verification_source_response(db,scope,report_id,i) for i in items]
 
 
-@router.patch("/{report_id}/root-cause-verifications/{vid}", response_model=VerificationResponse)
+@router.patch("/{report_id}/root-cause-verifications/{vid}", response_model=VerificationSourceResponse)
 async def update_verification_ep(
     report_id: uuid.UUID, vid: uuid.UUID, req: VerificationUpdate,
     db: AsyncSession = Depends(get_db), scope: RequestScope = Depends(get_request_scope),
@@ -1267,6 +1416,7 @@ async def update_verification_ep(
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1280,7 +1430,8 @@ async def update_verification_ep(
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return VerificationResponse.model_validate(rec)
+    await _authorize_capa_root(db, scope, report_id)
+    return await _verification_source_response(db,scope,report_id,rec)
 
 
 @router.post("/{report_id}/d7-node-actions", response_model=D7NodeActionResponse)
@@ -1292,6 +1443,7 @@ async def d7_record_action_ep(
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1318,6 +1470,7 @@ async def d7_list_actions_ep(
     # D7 action 行含 fmea_id/node_id/control 状态，属 FMEA 衍生数据——读也要 FMEA VIEW（与 POST 对齐，防 CAPA-only 用户绕过 FMEA 权限读 D7 元数据）
     if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1336,6 +1489,7 @@ async def d7_auto_fill_ep(
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     if await get_user_permission(scope.user, Module.FMEA, db) < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 fmea 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1370,6 +1524,7 @@ async def sink_knowledge(
         sink_capa_on_close,
     )
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1386,6 +1541,8 @@ async def sink_knowledge(
     try:
         entry = await sink_capa_on_close(db, capa, scope.user.user_id, manual=True)
         await db.commit()
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="D4_MATERIAL_UNAVAILABLE") from None
     except KnowledgeSinkBlockedError as e:
         raise HTTPException(
             status_code=422,
@@ -1416,13 +1573,17 @@ async def sink_knowledge(
     }
 
 
+from app.schemas.capa_ppt import PptExportRequest
+
 @router.post("/{report_id}/ppt-export")
 async def export_ppt(
     report_id: uuid.UUID,
     request: Request,
+    body: PptExportRequest | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(404, "CAPA 不存在")
@@ -1440,18 +1601,23 @@ async def export_ppt(
     tenant = tenant_schema(request)
 
     # 解析 LLM provider client（None = 未配置）
-    try:
-        pc = await provider_adapter.build_client(db)
-    except provider_adapter.ProviderNotConfiguredError:
-        pc = None
+    local_mode = body is not None and body.review_mode == 'local'
+    pc = None
+    if not local_mode:
+        try:
+            pc = await provider_adapter.build_client(db)
+        except provider_adapter.ProviderNotConfiguredError:
+            pc = None
 
     # 审查闭环 + 渲染：审查闭环异常（非 LLM 缺失）/ 渲染失败均属故事 §92 FAILED 条件 → 500，不落 export
     try:
-        from app.services.capa_d5_measures import _formal_ids
-        kwargs = {'scope': scope} if await _formal_ids(db, report_id) else {}
+        from app.services.capa_d4_material import material_version
+        export_material_version = await material_version(db, report_id)
         content, review = await capa_ppt_review_service.review_and_correct(
-            db, report_id, pc, tenant, **kwargs,
+            db, report_id, pc, tenant, scope=scope,
         )
+        if local_mode:
+            review.report = {**(review.report or {}), 'model_review': 'NOT_EXECUTED', 'reason': 'explicit_local_rules'}
         # 最终渲染一次（审查后 review_status 已知）
         meta = capa_ppt_service.ExportMeta(
             export_id=export_id, version=version,
@@ -1481,7 +1647,15 @@ async def export_ppt(
     ))
     await db.commit()
 
+    await _authorize_capa_root(db, scope, report_id)
+    if await material_version(db, report_id) != export_material_version:
+        raise HTTPException(403, "D4_MATERIAL_UNAVAILABLE")
+    try:
+        await capa_ppt_service.authorize_ppt_material(db,report_id,scope=scope)
+    except PermissionError:
+        raise HTTPException(403,'PPT_MATERIAL_UNAVAILABLE',headers={'Cache-Control':'no-store'}) from None
     headers = {
+        "Cache-Control": "no-store",
         "X-PPT-Review-Status": review.status,
         "X-PPT-Review-Rounds": str(review.rounds),
         "X-PPT-Export-Id": str(export_id),
@@ -1493,19 +1667,25 @@ async def export_ppt(
 async def get_ppt_export(
     report_id: uuid.UUID,
     export_id: uuid.UUID,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
     level = await get_user_permission(scope.user, Module.CAPA, db)
     if level < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(404, "CAPA 不存在")
     check_factory_access(capa.factory_id, scope)
-    export = await capa_ppt_service.get_export(db, export_id, report_id)
+    try:
+        export = await capa_ppt_service.get_export(db, export_id, report_id,scope=scope)
+    except PermissionError:
+        raise HTTPException(403,'PPT_MATERIAL_UNAVAILABLE',headers={'Cache-Control':'no-store'}) from None
     if export is None:
         raise HTTPException(404, "PPT 生成记录不存在")
+    response.headers['Cache-Control']='no-store'
     return PptExportDetailResponse(
         export_id=str(export.export_id), capa_id=str(export.capa_id),
         generated_at=export.generated_at, generated_by=str(export.generated_by),
@@ -1543,6 +1723,7 @@ async def d3_import_ep(
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1564,6 +1745,7 @@ async def d3_list_runs_ep(
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1603,6 +1785,7 @@ async def d3_list_snapshots_ep(
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1626,6 +1809,7 @@ async def d3_get_report_ep(
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1676,6 +1860,7 @@ async def d3_generate_report_ep(
 ):
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1752,6 +1937,7 @@ async def d3_generate_advice_ep(
     """POST /d3/advice: Generate AI advice for a CAPA's current impact report."""
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1835,6 +2021,7 @@ async def d3_get_advice_ep(
     Optional run_id queries a specific (historical) run's report/generation."""
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1959,6 +2146,7 @@ async def d3_decision_advice_ep(
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -1994,6 +2182,7 @@ async def d3_list_adoptions_ep(
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -2062,6 +2251,7 @@ async def d3_record_execution_ep(
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -2113,6 +2303,7 @@ async def d3_update_execution_ep(
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -2142,6 +2333,7 @@ async def d3_list_executions_ep(
     if await get_user_permission(scope.user, Module.CAPA, db) < PermissionLevel.VIEW:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 VIEW 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -2190,6 +2382,7 @@ async def _load_capa_for_doc_gate(
             status_code=403,
             detail=f"需要 capa 模块的 {min_level.name} 权限",
         )
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None:
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -2236,7 +2429,7 @@ async def doc_gate_get_impact_ep(
 ):
     """GET /doc-gate/impact: latest analysis (incl failed)."""
     capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.VIEW)
-    result = await capa_doc_gate_service.get_latest_analysis(db, capa)
+    result = await capa_doc_gate_service.get_latest_analysis(db, capa, scope.user.user_id)
     if result is None:
         raise HTTPException(status_code=404, detail="尚未生成影响分析")
     return result
@@ -2245,6 +2438,7 @@ async def doc_gate_get_impact_ep(
 @router.post("/{report_id}/doc-gate/audit")
 async def doc_gate_audit_ep(
     report_id: uuid.UUID,
+    body: dict | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -2252,11 +2446,13 @@ async def doc_gate_audit_ep(
     capa = await _load_capa_for_doc_gate(report_id, db, scope, PermissionLevel.EDIT)
     _assert_d8_gate_stage(capa)
     try:
-        result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id)
+        result = await capa_doc_gate_service.run_audit(db, capa, scope.user.user_id,manual_command=body)
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # Serialize UUID fields for JSON
@@ -2337,12 +2533,14 @@ async def doc_gate_defer_ep(
         raise HTTPException(status_code=400, detail="owner_id 非法")
     try:
         result = await capa_doc_gate_service.record_defer(
-            db, capa, body.reason, owner_id, body.deadline, scope.user.user_id
+            db, capa, body.reason, owner_id, body.deadline, scope.user.user_id,manual_command=body.model_dump(mode="json",include={'operation_key','expected_material_version','expected_analysis_id'},exclude_none=True)
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2351,6 +2549,7 @@ async def doc_gate_defer_ep(
 @router.post("/{report_id}/doc-gate/confirm-no-affected")
 async def doc_gate_confirm_no_affected_ep(
     report_id: uuid.UUID,
+    body: dict | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
@@ -2359,12 +2558,14 @@ async def doc_gate_confirm_no_affected_ep(
     _assert_d8_gate_stage(capa)
     try:
         result = await capa_doc_gate_service.confirm_no_affected(
-            db, capa, scope.user.user_id
+            db, capa, scope.user.user_id,manual_command=body
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2431,12 +2632,14 @@ async def doc_gate_waiver_ep(
             capa,
             body.reason,
             [item.model_dump() for item in body.items],
-            scope.user.user_id,
+            scope.user.user_id,manual_command=body.model_dump(mode="json",include={'operation_key','expected_material_version','expected_analysis_id'},exclude_none=True),
         )
     except PermissionError:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 APPROVE 权限")
     except LookupError:
         raise HTTPException(status_code=404, detail="8D report not found")
+    except capa_doc_gate_service.ManualDecisionConflict:
+        raise HTTPException(status_code=409,detail="Manual decision material changed") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return result
@@ -2464,6 +2667,7 @@ async def decide_lateral_route(
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")
@@ -2501,6 +2705,7 @@ async def rerun_lateral_route(
     if level < PermissionLevel.EDIT:
         raise HTTPException(status_code=403, detail="需要 capa 模块的 EDIT 权限")
 
+    await _authorize_capa_root(db, scope, report_id)
     capa = await capa_service.get_capa(db, report_id)
     if capa is None or not is_factory_visible(capa.factory_id, scope):
         raise HTTPException(status_code=404, detail="8D report not found")

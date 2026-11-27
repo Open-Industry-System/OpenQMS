@@ -91,9 +91,9 @@ describe("user-only task wrapper", () => {
 });
 it('accepts actual TaskOut immutable deployment, strict approved choices and launch timeout',async()=>{
   const api=await import('./agentTasks');
-  vi.mocked(client.post).mockResolvedValueOnce({data:{...task,model_deployment:{deployment_id:id,name:'A',version:'1'}}});
+  vi.mocked(client.post).mockResolvedValueOnce({data:{...task,model_deployment:{deployment_id:id,name:'A',version:'1',profile:'model_d5_proposal_v1'}}});
   expect((await createTask({report_id:id,installation_id:id,request_key:'k',initial_text:'x',model_deployment_id:id})).model_deployment?.name).toBe('A');
-  vi.mocked(client.get).mockResolvedValue({data:{items:[{deployment_id:id,name:'A',version:'1',kind:'local'}]}});
+  vi.mocked(client.get).mockResolvedValue({data:{items:[{deployment_id:id,name:'A',version:'1',kind:'local',profile:'model_d5_proposal_v1'}]}});
   expect((await api.listModelDeployments()).items).toHaveLength(1);
   vi.mocked(client.post).mockResolvedValueOnce({data:{task_id:id,status:'executed'}});
   await api.launchTask(id);

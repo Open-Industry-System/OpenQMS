@@ -7,7 +7,9 @@ from app.schemas.recommendation_stage import StageRunSchema
 from app.state_machines.eightd_state import EightDState
 
 
-class CAPACreate(BaseModel):
+from app.schemas.database_text import DatabaseTextInput
+
+class CAPACreate(DatabaseTextInput):
     title: str
     document_no: str
     severity: str = "general"
@@ -16,7 +18,9 @@ class CAPACreate(BaseModel):
     supplier_id: uuid.UUID | None = None
 
 
-class CAPAUpdate(BaseModel):
+class CAPAUpdate(DatabaseTextInput):
+    expected_entry_epoch: int | None = None
+    expected_material_version: str | None = None
     title: str | None = None
     d1_team: list[dict] | None = None
     d2_description: str | None = None
@@ -34,7 +38,7 @@ class CAPAUpdate(BaseModel):
     supplier_id: uuid.UUID | None = None
 
 
-class CAPATriggerScarRequest(BaseModel):
+class CAPATriggerScarRequest(DatabaseTextInput):
     supplier_id: uuid.UUID
     description: str | None = None
     requested_action: str | None = None
@@ -69,6 +73,9 @@ class SupplierRiskInputProjection(BaseModel):
 
 
 class CAPAResponse(BaseModel):
+    entry_phase: str = "legacy"
+    entry_epoch: int = 0
+    material_version: str | None = None
     report_id: uuid.UUID
     document_no: str
     title: str
@@ -136,6 +143,7 @@ class D7RecommendationResponse(BaseModel):
 
 
 class D4Recommendation(BaseModel):
+    capture_id: uuid.UUID | None = None
     failure_cause_node_id: str | None = None
     failure_cause_name: str
     failure_cause_desc: str | None = None
@@ -167,6 +175,7 @@ class D4RecommendationResponse(BaseModel):
 
 
 class D5ExistingControl(BaseModel):
+    capture_id: uuid.UUID | None = None
     failure_mode_node_id: str | None = None
     failure_mode_name: str | None = None
     failure_cause_node_id: str | None = None
@@ -187,6 +196,7 @@ class D5ExistingControl(BaseModel):
 
 
 class D5GeneralSuggestion(BaseModel):
+    capture_id: uuid.UUID | None = None
     content: str
     category: str  # "预防措施" | "探测措施" | "纠正措施"
     basis: str

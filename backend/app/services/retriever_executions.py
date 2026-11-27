@@ -38,6 +38,8 @@ async def run_retrievers(
     fmea_type: str,
     product_line_code: str,
     user,
+    source_bindings: list | None = None,
+    delivery_guard=None,
 ) -> tuple[list[SourceExecution], list[SuggestionItem]]:
     from app.services.lessons_learned.context import LessonsLearnedContext
     from app.services.lessons_learned.sources.semantic import LessonsSemanticSource
@@ -53,7 +55,7 @@ async def run_retrievers(
     context = LessonsLearnedContext(
         doc_type="fmea", doc_id=fmea_id, query_text=query_text,
         fmea_type=fmea_type, severity=None,
-        product_line_code=product_line_code, user_product_lines=user_product_lines,
+        product_line_code=product_line_code, user_product_lines=user_product_lines, actor_id=user.user_id,
     )
 
     # --- semantic_search (pgvector over FMEA node embeddings) ---
@@ -82,7 +84,14 @@ async def run_retrievers(
     from app.services.lessons_learned.sources.historical_capa import LessonsCAPASource
     from app.services.lessons_learned.sources.rule_engine import LessonsRuleSource
 
+    from app.services.capa_d4_material import capture_legacy_candidate_bindings, require_legacy_candidate_bindings
+    captured_parents = ()
+    async def context_guard():
+        if delivery_guard is not None:
+            await delivery_guard()
+        await require_legacy_candidate_bindings(db, captured_parents, actor=user)
     async def _lessons():
+        nonlocal captured_parents
         sources = [
             LessonsCAPASource(db, embedding),
             AuditFindingSource(db, embedding),
@@ -91,13 +100,23 @@ async def run_retrievers(
         cands: list = []
         for src in sources:
             try:
-                cands.extend(await src.retrieve(context))
+                await require_legacy_candidate_bindings(db, captured_parents, actor=user)
+                from app.services.egress_guard import with_delivery_guard
+                recalled = await with_delivery_guard(context_guard, lambda: src.retrieve(context))
+                captured = await capture_legacy_candidate_bindings(db, recalled, actor=user)
+                captured_parents = tuple(sorted(set(captured_parents + captured)))
+                cands.extend(recalled)
+            except PermissionError:
+                raise
             except Exception:
                 # Source failures are non-fatal — match orchestrator behavior.
                 continue
         return cands
 
     les_exec, les_cands = await _run_one("lessons_learned", _lessons)
+    await require_legacy_candidate_bindings(db, captured_parents, actor=user)
+    if source_bindings is not None:
+        source_bindings.extend(captured_parents)
     executions.append(les_exec)
     suggestions.extend(
         SuggestionItem(

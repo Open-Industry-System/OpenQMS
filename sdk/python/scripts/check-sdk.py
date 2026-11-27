@@ -157,7 +157,8 @@ expected = {'__version__', 'SDKError', 'ConfigError', 'ValidationError', 'Transp
  'ClientClosed', 'ClientBusy', 'ClientConfig', 'RunClaim', 'Capability', 'Capabilities',
  'RuntimeMessage', 'MessageBatch', 'MessageAck', 'MessageHistory', 'Verification',
  'CapaContext', 'EventPayload', 'ResultPayload', 'Source', 'RuntimeEvent', 'RuntimeResult',
- 'ReadonlyCheckpoint', 'FinishResult', 'InstallationClient', 'RunClient'}
+ 'ReadonlyCheckpoint', 'FinishResult', 'InstallationClient', 'RunClient', 'ManagedLaunch',
+ 'ModelTurn','ModelToolCall','ModelToolResult','D4CandidateCheckpoint','D4CandidateReference'}
 assert set(sdk.__all__) == expected and len(sdk.__all__) == len(expected)
 for name in ('ClaimEnvelope', 'EncodedRequest', 'WireResponse', 'SUPPORTED_OPERATIONS'):
     assert not hasattr(sdk, name)
@@ -166,14 +167,15 @@ for cls in (sdk.InstallationClient, sdk.RunClient):
         assert not hasattr(cls, name)
 assert callable(sdk.InstallationClient.claim_run)
 for name in ('capabilities', 'claim_messages', 'ack_messages', 'get_capa_context',
-             'record_event', 'save_result', 'save_checkpoint', 'message_history', 'finish'):
+             'record_event', 'save_result', 'save_checkpoint', 'message_history', 'finish',
+             'model_turn','model_tool','save_d4_candidate','save_d4_checkpoint','from_launch'):
     assert callable(getattr(sdk.RunClient, name))
 # Construction/close must also remain local under the import-time guard.
 client = sdk.InstallationClient(sdk.ClientConfig('http://127.0.0.1:1', 'fixture'),
     '00000000-0000-0000-0000-000000000001', 'fixture-only-not-a-credential')
 client.close()
 with open(sys.argv[1], 'x', encoding='utf-8') as stream:
-    json.dump({'version': sdk.__version__, 'module': str(module), 'api_methods': 10,
+    json.dump({'version': sdk.__version__, 'module': str(module), 'api_methods': 15,
                'runtime_requirements': [], 'status': 'PASS'}, stream)
 '''
 
@@ -238,7 +240,7 @@ def wheel_layer(workspace, env):
         result['count_kind'] = 'isolated_wheel_probe'
         if code == 0:
             probe = json.loads(probe_path.read_text(encoding='utf-8'))
-            if probe.get('status') != 'PASS' or probe.get('api_methods') != 10:
+            if probe.get('status') != 'PASS' or probe.get('api_methods') != 15:
                 raise ValueError('invalid_probe_receipt')
             probe_path.chmod(0o600)
             result.update(status='PASS', passed=1, probe=probe)

@@ -14,7 +14,7 @@ from tests.conftest import _test_db_url
 
 
 REV = "20260913_user_refresh_sessions"
-PUBLIC_HEAD = "20261116_security_main_merge"
+PUBLIC_HEAD = "20261118_r6_security_merge"
 DOWN_REV = "20260727_warranty_factory_id"
 TABLE = "user_refresh_sessions"
 OLD_FILENAME = "20260913_user_refresh_sessions.py"

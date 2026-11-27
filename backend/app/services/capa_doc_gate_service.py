@@ -20,6 +20,7 @@ from app.services.cp_sync_protection import cp_input_state, lock_analysis_inputs
 from app.services.capa_review_guard import lock_current_material_write
 from app.services.capa_current_access import current_capa_actor_target, require_business_namespace
 from app.core.permissions import PermissionLevel
+from app.services.capa_r6_local_closure import ManualDecisionConflict, prepare_decision, persist_decision_receipt, finish_decision
 
 logger = logging.getLogger(__name__)
 STALE_THRESHOLD_SECONDS = 300  # 5 min; running older than 2x = stale
@@ -49,9 +50,19 @@ async def _lock_doc_gate_write(
     required_level: PermissionLevel = PermissionLevel.EDIT,
 ) -> CAPAEightD:
     """Authorize, lock, and validate CAPA material before D8 gate mutation."""
+    from app.services.capa_d4_material import require_legacy_root_only
+    from app.services.capa_r6_local_closure import eligible, admit, scope_for
+    restricted = await eligible(db,capa.report_id)
+    if restricted: await admit(db,scope_for(user_id),capa.report_id,required_level)
+    else: await require_legacy_root_only(db,capa.report_id)
     capa = await lock_current_material_write(
         db, capa, user_id, required_level
     )
+    if restricted:
+        from app.services.capa_r6_local_closure import lock_transition_sources
+        await lock_transition_sources(db,capa,user_id)
+        await admit(db,scope_for(user_id),capa.report_id,required_level)
+    else: await require_legacy_root_only(db,capa.report_id)
     if capa.status != "D8_GATE_PENDING":
         raise ValueError("当前状态不可写入文档门禁")
     from types import SimpleNamespace
@@ -63,6 +74,12 @@ async def _lock_doc_gate_write(
 
 async def generate_impact_analysis(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
     """Three-phase: phase1 lock+demote+stale-recovery+running+commit; phase2 LLM; phase3 CAS."""
+    from sqlalchemy import inspect
+    from app.services.capa_r6_local_closure import eligible
+    identity = inspect(capa).identity
+    if identity is None:
+        raise ValueError("CAPA input is not persisted")
+    if await eligible(db,identity[0]): raise PermissionError('Restricted report requires manual analysis')
     p1 = await _phase1_create_running(db, capa, user_id)
     if p1["status"] in ("blocked", "failed", "running", "superseded"):
         return p1
@@ -70,16 +87,24 @@ async def generate_impact_analysis(db: AsyncSession, capa: CAPAEightD, user_id: 
     return await _phase3_cas(db, capa, p1, phase2, user_id)
 
 
-async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD) -> dict | None:
-    """Return latest analysis (incl failed) for this capa. ORDER BY created_at DESC, analysis_id DESC."""
-    row = await db.scalar(
-        select(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id == capa.report_id)
-        .order_by(CapaDocgAnalysis.created_at.desc(), CapaDocgAnalysis.analysis_id.desc()).limit(1)
-    )
-    if row is None:
-        return None
-    return {"analysis_id": str(row.analysis_id), "status": row.status, "affected_docs": row.affected_docs,
-            "error": row.error, "is_current": row.is_current}
+async def get_latest_analysis(db: AsyncSession, capa: CAPAEightD, actor_id=None) -> dict | None:
+    """Read manual or model analysis through its actual current source authority."""
+    from app.services.capa_d4_material import require_legacy_root_only
+    from app.services.capa_r6_local_closure import eligible,admit,scope_for
+    restricted=await eligible(db,capa.report_id)
+    if restricted:
+        if actor_id is None: raise PermissionError('Current actor required')
+        await admit(db,scope_for(actor_id),capa.report_id)
+    else:
+        await require_legacy_root_only(db,capa.report_id)
+    row=await db.scalar(select(CapaDocgAnalysis).where(CapaDocgAnalysis.capa_id==capa.report_id)
+        .order_by(CapaDocgAnalysis.created_at.desc(),CapaDocgAnalysis.analysis_id.desc()).limit(1))
+    if row is None:return None
+    result=dict(analysis_id=str(row.analysis_id),status=row.status,affected_docs=row.affected_docs,
+        error=row.error,is_current=row.is_current,analysis_method=row.analysis_method)
+    if restricted:await admit(db,scope_for(actor_id),capa.report_id)
+    else:await require_legacy_root_only(db,capa.report_id)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -93,19 +118,22 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
     await require_legacy_d5_only(db, capa.report_id)
     # The parent lock is retained through phase 1's small transaction.
     # Demote old current (fail-closed: before credential check)
-    await db.execute(
+    demoted = await db.execute(
         update(CapaDocgAnalysis)
         .where(CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True)
         .values(is_current=False)
     )
     # Stale recovery: CAS running older than 2x threshold -> failed
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=STALE_THRESHOLD_SECONDS * 2)
-    await db.execute(
+    recovered = await db.execute(
         update(CapaDocgAnalysis)
         .where(CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.status == "running",
                CapaDocgAnalysis.started_at < cutoff)
         .values(status="failed", error="stale", completed_at=datetime.now(timezone.utc))
     )
+    if demoted.rowcount or recovered.rowcount:
+        from app.services.capa_d4_material import bump_material
+        await bump_material(db, capa.report_id)
     # Existing running -> return retry_after
     existing = await db.scalar(
         select(CapaDocgAnalysis).where(
@@ -134,6 +162,8 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
             },
             operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
         ))
+        from app.services.capa_d4_material import bump_material
+        await bump_material(db, capa.report_id)
         await db.commit()
         raise ValueError("BLOCKED: 无 LLM 凭证")
     # Create running
@@ -146,7 +176,9 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
     db.add(analysis)
     await db.flush()
     response = {"status": "phase1_done", "analysis_id": str(analysis.analysis_id),
-                "attempt_token": attempt_token, "client": client}
+                "attempt_token": attempt_token, "client": client, "actor_id": user_id}
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, capa.report_id)
     await db.commit()
     return response
 
@@ -156,6 +188,20 @@ async def _phase1_create_running(db: AsyncSession, capa: CAPAEightD, user_id: uu
 # ---------------------------------------------------------------------------
 
 async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
+    from types import SimpleNamespace
+    from sqlalchemy import inspect
+    from app.services.capa_d4_material import legacy_capa_read_binding
+    identity = inspect(capa).identity
+    if identity is None:
+        raise ValueError("CAPA input is not persisted")
+    actor = SimpleNamespace(user_id=p1["actor_id"])
+    report_id = identity[0]
+    initial_binding = await legacy_capa_read_binding(db, actor, report_id,
+        required_level=PermissionLevel.EDIT)
+    async def fence():
+        if await legacy_capa_read_binding(db, actor, report_id,
+                required_level=PermissionLevel.EDIT) != initial_binding:
+            raise PermissionError("D4_MATERIAL_CHANGED: continue manual D5")
     capa = await _fresh_capa_phase(db, capa)
     candidates = await _build_allowlist(db, capa)
     input_hash = _compute_input_hash(capa, candidates)
@@ -164,10 +210,18 @@ async def _phase2_llm(db: AsyncSession, capa: CAPAEightD, p1: dict) -> dict:
     # Commit any autobegun read txn before calling LLM
     await db.commit()
     pc = p1["client"]
+    async def request_fence():
+        await fence()
+        await db.commit()
+    await fence()
     try:
-        raw = await provider_adapter.complete_json(pc, prompt, _RESPONSE_SCHEMA)
+        raw = await provider_adapter.with_delivery_guard(request_fence,
+            lambda: provider_adapter.complete_json(pc, prompt, _RESPONSE_SCHEMA))
+    except PermissionError:
+        raise
     except Exception as e:
         return {"llm_error": str(e)}
+    await fence()
     # complete_json may return non-dict (array/null) if provider ignores schema —
     # convert to llm_error so phase3 CAS marks failed instead of leaving running.
     if not isinstance(raw, dict):
@@ -198,6 +252,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
             .values(status="failed", error=phase2["llm_error"], completed_at=now)
         )
         if res.rowcount > 0:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
                 changed_fields={
@@ -229,6 +285,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
             .values(status="failed", error="input_changed", completed_at=now)
         )
         if res.rowcount > 0:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
                 changed_fields={
@@ -251,6 +309,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
             .values(status="failed", error=affected, completed_at=now)
         )
         if res.rowcount > 0:
+            from app.services.capa_d4_material import bump_material
+            await bump_material(db, capa.report_id)
             db.add(AuditLog(
                 table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
                 changed_fields={
@@ -274,6 +334,8 @@ async def _phase3_cas(db: AsyncSession, capa: CAPAEightD, p1: dict, phase2: dict
     )
     if res.rowcount == 0:
         return {"status": "superseded"}
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, capa.report_id)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id, action="DOC_IMPACT_ANALYZED",
         changed_fields={"affected_doc_count": len(affected), "llm_available": True, "status": "done"},
@@ -772,9 +834,11 @@ def _validate_key_point(kp: dict, cand: dict) -> str | None:
 from app.services.diff_engine import diff_fmea_graphs, diff_cp_headers
 
 
-async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
+async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID, *, manual_command=None) -> dict:
     """Audit each affected doc's version bump + key-point coverage. Insert audit + decision rows."""
     capa = await _lock_doc_gate_write(db, capa, user_id)
+    replay=await prepare_decision(db,capa,user_id,'audit',manual_command,{})
+    if replay is not None:return replay
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
@@ -813,10 +877,8 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
     if analysis is None or analysis.status != "done":
         raise ValueError("影响分析已失效，请重新生成影响分析")
     # C9 precheck
-    candidates = await _build_allowlist(db, capa)
-    cur_hash = _compute_input_hash(capa, candidates)
-    if cur_hash != analysis.analysis_input_hash:
-        raise ValueError("分析输入已变更，请重新生成影响分析")
+    from app.services.capa_r6_local_closure import require_analysis_fresh
+    await require_analysis_fresh(db,capa,analysis,user_id)
     if not analysis.affected_docs:
         raise ValueError("空影响清单须人工确认，不可运行自动审核")
     audit_run_id = uuid.uuid4()
@@ -883,7 +945,7 @@ async def run_audit(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> d
             operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
         ))
     await db.commit()
-    return {"decision": decision, "audits": audits, "audit_run_id": str(audit_run_id)}
+    return await finish_decision(db,{"decision": decision, "audits": audits, "audit_run_id": str(audit_run_id)})
 
 
 async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, audit_run_id, version_snapshot,
@@ -904,7 +966,14 @@ async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, 
     from app.services.capa_d5_measures import _formal_ids, full_d5_material
     identity = (await db.execute(select(CapaDocgAnalysis.capa_id,
         CapaDocgAnalysis.analysis_input_hash).where(CapaDocgAnalysis.analysis_id == analysis_id))).one()
-    if await _formal_ids(db, identity.capa_id):
+    method=await db.scalar(select(CapaDocgAnalysis.analysis_method).where(CapaDocgAnalysis.analysis_id==analysis_id))
+    if method=='manual':
+        level=PermissionLevel.APPROVE if waiver_items is not None else PermissionLevel.EDIT
+        current=await current_capa_actor_target(db,user_id,identity.capa_id,level)
+        analysis=await db.get(CapaDocgAnalysis,analysis_id,populate_existing=True)
+        from app.services.capa_r6_local_closure import require_analysis_fresh
+        await require_analysis_fresh(db,current,analysis,user_id)
+    elif await _formal_ids(db, identity.capa_id):
         level = PermissionLevel.APPROVE if waiver_items is not None else PermissionLevel.EDIT
         current = await current_capa_actor_target(db, user_id, identity.capa_id, level)
         candidates = await _build_allowlist(db, current)
@@ -912,7 +981,9 @@ async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, 
             scope=SimpleNamespace(user=SimpleNamespace(user_id=user_id)))
         if _compute_input_hash(current, candidates) != identity.analysis_input_hash:
             raise ValueError("分析输入已变更，请重新生成影响分析")
-    db.add(CapaDocgDecision(
+    from app.services.capa_d4_material import bump_material
+    await bump_material(db, identity.capa_id)
+    result=CapaDocgDecision(
         analysis_id=analysis_id, audit_run_id=audit_run_id,
         revision=(max_rev if max_rev is not None else -1) + 1,
         factory_id=factory_id, decision=decision, version_snapshot=version_snapshot,
@@ -920,7 +991,10 @@ async def _insert_decision(db, analysis_id, factory_id, decision, user_id, now, 
         no_affected_confirmed=no_affected_confirmed,
         waiver_reason=waiver_reason, waiver_items=waiver_items,
         decided_by=user_id, decided_at=now,
-    ))
+    )
+    db.add(result)
+    await db.flush()
+    await persist_decision_receipt(db,result)
 
 
 async def _audit_one_doc(db, capa, doc, audit_run_id, user_id, now):
@@ -1106,7 +1180,7 @@ def _match_key_point(kp, diff, latest, doc_type):
 # record_defer + confirm_no_affected (Task 4)
 # ---------------------------------------------------------------------------
 
-async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id: uuid.UUID, deadline, user_id: uuid.UUID) -> dict:
+async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id: uuid.UUID, deadline, user_id: uuid.UUID, *, manual_command=None) -> dict:
     """Record a deferred decision (still blocks the gate — C5). Owner validated against capa factory.
 
     Factory authorization: accept if primary factory matches OR UserFactory
@@ -1115,6 +1189,8 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
     not treat it as group-admin cross-factory access.
     """
     capa = await _lock_doc_gate_write(db, capa, user_id)
+    replay=await prepare_decision(db,capa,user_id,'defer',manual_command,dict(reason=reason,owner_id=str(owner_id),deadline=str(deadline)))
+    if replay is not None:return replay
     if not reason or not str(reason).strip():
         raise ValueError("defer reason 必填")
     from app.models.user import User
@@ -1135,9 +1211,8 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
         raise ValueError("未生成影响分析")
     await lock_analysis_inputs(db, analysis)
     # C9 precheck
-    candidates = await _build_allowlist(db, capa)
-    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
-        raise ValueError("分析输入已变更，请重新生成影响分析")
+    from app.services.capa_r6_local_closure import require_analysis_fresh
+    await require_analysis_fresh(db,capa,analysis,user_id)
     from datetime import date as date_cls
     dl = deadline if isinstance(deadline, date_cls) else date_cls.fromisoformat(str(deadline))
     now = datetime.now(timezone.utc)
@@ -1145,16 +1220,18 @@ async def record_defer(db: AsyncSession, capa: CAPAEightD, reason: str, owner_id
                           defer_reason=reason, defer_owner=owner_id, defer_deadline=dl)
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_DEFERRED",
-        changed_fields={"reason": reason, "owner": str(owner_id), "deadline": str(dl)},
+        changed_fields=({"analysis_id": str(analysis.analysis_id), "decision": "deferred", "owner": str(owner_id), "deadline": str(dl)} if analysis.analysis_method=='manual' else {"reason":reason,"owner":str(owner_id),"deadline":str(dl)}),
         operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
     ))
     await db.commit()
-    return {"decision": "deferred"}
+    return await finish_decision(db,{"decision": "deferred"})
 
 
-async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID) -> dict:
+async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.UUID, *, manual_command=None) -> dict:
     """Engineer confirms an empty affected_docs list is correct -> decision=passed (no_affected_confirmed)."""
     capa = await _lock_doc_gate_write(db, capa, user_id)
+    replay=await prepare_decision(db,capa,user_id,'no_affected',manual_command,{})
+    if replay is not None:return replay
     analysis = await db.scalar(
         select(CapaDocgAnalysis).where(
             CapaDocgAnalysis.capa_id == capa.report_id, CapaDocgAnalysis.is_current == True
@@ -1163,9 +1240,8 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
     if analysis is None or analysis.status != "done":
         raise ValueError("未生成有效影响分析")
     await lock_analysis_inputs(db, analysis)
-    candidates = await _build_allowlist(db, capa)
-    if _compute_input_hash(capa, candidates) != analysis.analysis_input_hash:
-        raise ValueError("分析输入已变更，请重新生成影响分析")
+    from app.services.capa_r6_local_closure import require_analysis_fresh
+    await require_analysis_fresh(db,capa,analysis,user_id)
     if analysis.affected_docs:
         raise ValueError("仅空清单可确认")
     now = datetime.now(timezone.utc)
@@ -1177,7 +1253,7 @@ async def confirm_no_affected(db: AsyncSession, capa: CAPAEightD, user_id: uuid.
         operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
     ))
     await db.commit()
-    return {"decision": "passed", "no_affected_confirmed": True}
+    return await finish_decision(db,{"decision": "passed", "no_affected_confirmed": True})
 
 
 async def record_gate_waiver(
@@ -1186,6 +1262,7 @@ async def record_gate_waiver(
     reason: str,
     items: list[dict],
     user_id: uuid.UUID,
+    *, manual_command=None,
 ) -> dict:
     """Waive exact blocked_modify CP keypoints after a blocked audit.
 
@@ -1205,6 +1282,8 @@ async def record_gate_waiver(
     Caller must require APPROVE permission on the capa module (enforced in API).
     """
     capa = await _lock_doc_gate_write(db, capa, user_id, PermissionLevel.APPROVE)
+    replay=await prepare_decision(db,capa,user_id,'waiver',manual_command,dict(reason=reason,items=items))
+    if replay is not None:return replay
     if not reason or not str(reason).strip():
         raise ValueError("waiver reason 必填")
     if not items:
@@ -1253,18 +1332,17 @@ async def record_gate_waiver(
     db.add(AuditLog(
         table_name="capa_eightd", record_id=capa.report_id, action="DOC_GATE_WAIVER",
         changed_fields={
-            "reason": reason,
-            "decision_from": "blocked",
-            "decision_to": "passed",
+            **({"analysis_id":str(analysis.analysis_id),"waiver_item_count":len(validated)}
+               if analysis.analysis_method=='manual' else {"reason":reason,"waiver_items":validated}),
+            "decision_from": "blocked", "decision_to": "passed",
             "audit_run_id": str(latest_decision.audit_run_id),
-            "waiver_items": validated,
         },
         operated_by=user_id, factory_id=capa.factory_id, operated_at=now,
     ))
     await db.commit()
-    return {
+    return await finish_decision(db,{
         "decision": "passed",
         "waiver_reason": reason,
         "waiver_items": validated,
         "audit_run_id": str(latest_decision.audit_run_id),
-    }
+    })

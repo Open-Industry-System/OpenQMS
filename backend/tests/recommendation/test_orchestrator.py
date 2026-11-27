@@ -294,3 +294,7 @@ async def test_d4_stage3_historical_capa_skipped_when_no_embedding():
     s3 = next(s for s in result.stages if s.index == 3)
     assert s3.status == "skipped"
     assert "未配置 embedding" in s3.summary
+
+
+# Isolate prompt/orchestration units; real DB sessions still use current authority.
+from tests.legacy_capa_unit_support import legacy_material_unit_guards  # noqa: F401,E402

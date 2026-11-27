@@ -465,7 +465,8 @@ async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> 
     from app.models.audit import AuditLog
 
     query = (
-        select(AuditLog)
+        select(AuditLog.log_id, AuditLog.record_id, AuditLog.table_name,
+               AuditLog.action, AuditLog.operated_at)
         .where(AuditLog.operated_by == user_id)
         .where(AuditLog.action != "AI_TREND_INTERPRET")
         .where(AuditLog.table_name != "quality_trends")
@@ -473,7 +474,7 @@ async def get_recent_actions(db: AsyncSession, user_id: str, limit: int = 5) -> 
         .limit(limit)
     )
     result = await db.execute(query)
-    logs = result.scalars().all()
+    logs = result.all()
 
     actions = []
     for log in logs:

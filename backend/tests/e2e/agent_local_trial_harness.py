@@ -202,7 +202,7 @@ class OwnedTrial(SimpleNamespace):
 
 
 @pytest_asyncio.fixture
-async def owned_local_trial(monkeypatch, tmp_path):
+async def owned_local_trial(monkeypatch, tmp_path, *, tenant_slug=None):
     import app.database as database
     import app.main as main
     from app.api import auth, agent_tasks, agent_runtime, capa
@@ -239,7 +239,7 @@ async def owned_local_trial(monkeypatch, tmp_path):
     app.add_middleware(tenant_context.TenantContextMiddleware)
     owned = None
     tenant = None
-    slug = 'localtrial-'+uuid4().hex[:12]
+    slug = tenant_slug or 'localtrial-'+uuid4().hex[:12]
     try:
         tenant = await tenant_migrator.provision_new(TenantCreateRequest(name='Owned local metadata trial',
             slug=slug, admin_email='trial@example.test', admin_password=PASSWORD))

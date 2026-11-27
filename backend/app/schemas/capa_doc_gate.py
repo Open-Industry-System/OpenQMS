@@ -2,9 +2,16 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 
-class DeferRequest(BaseModel):
+class ManualExpected(BaseModel):
+    operation_key: str | None = Field(default=None,max_length=128,pattern=r'^[A-Za-z0-9._:-]+$')
+    expected_material_version: str | None = Field(default=None,max_length=512)
+    expected_analysis_id: UUID | None = None
+
+
+class DeferRequest(ManualExpected):
     reason: str = Field(..., min_length=1)
     owner_id: str
     deadline: str  # ISO date YYYY-MM-DD
@@ -18,7 +25,7 @@ class WaiverItemRequest(BaseModel):
     field: str = Field(..., min_length=1)
 
 
-class WaiverRequest(BaseModel):
+class WaiverRequest(ManualExpected):
     reason: str = Field(..., min_length=1)
     items: list[WaiverItemRequest] = Field(..., min_length=1)
 

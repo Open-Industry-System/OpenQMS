@@ -7,6 +7,7 @@ from typing import Protocol
 import httpx
 
 from app.config import settings as app_settings
+from app.services.egress_guard import run_sdk_operation, run_http_operation
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +80,8 @@ class OpenAIEmbeddingProvider:
         self._dimensions = dimensions
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        response = await self._client.embeddings.create(
-            model=self._model,
-            input=texts,
-        )
+        response = await run_sdk_operation(self._client, lambda client: client.embeddings.create(
+            model=self._model, input=texts))
         return [item.embedding for item in response.data]
 
     @property
@@ -130,10 +129,10 @@ class OllamaEmbeddingProvider:
     async def embed(self, texts: list[str]) -> list[list[float]]:
         results = []
         for text in texts:
-            resp = await self._client.post("/api/embeddings", json={
+            resp = await run_http_operation(self._client, lambda: self._client.post("/api/embeddings", json={
                 "model": self._model,
                 "prompt": text,
-            })
+            }))
             resp.raise_for_status()
             results.append(resp.json()["embedding"])
         return results

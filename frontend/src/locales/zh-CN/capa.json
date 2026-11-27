@@ -480,7 +480,11 @@
     "d7": "D7 动作记录",
     "gate": {
       "title": "文档门禁决定",
-      "decision": { "passed": "已通过", "blocked": "已阻断", "deferred": "已延期" },
+      "decision": {
+        "passed": "已通过",
+        "blocked": "已阻断",
+        "deferred": "已延期"
+      },
       "decisionId": "门禁决定 ID",
       "revision": "门禁修订号",
       "decidedBy": "决定人",
@@ -541,5 +545,15 @@
       "passed": "验证通过",
       "failed": "验证未通过"
     }
+  },
+  "r6": {
+    "candidateTitle": "D4 根因候选 · 员工确认",
+    "sourceTitle": "受控依据详情",
+    "measureTitle": "正式 D5 更正与历史",
+    "localTitle": "本地闭环 · 人工文档门禁",
+    "localPpt": "导出本地规则版 PPT（模型不运行）",
+    "localPptDone": "本地规则版已导出；模型审查未运行。",
+    "localReviewTitle": "本轮本地闭环与传播处置",
+    "localReviewNote": "人工分析单独记录；传播渠道本轮按记录明确不执行。"
   }
 }
