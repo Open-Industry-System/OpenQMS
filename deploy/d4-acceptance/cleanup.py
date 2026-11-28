@@ -44,13 +44,21 @@ def database_binding(lease, phase):
     return dict(json.loads(slot[1]), lease=lease)
 
 
-def stop_unit(unit, run=command):
+def stop_unit(unit, run=command, *, allow_exited_failure=False):
     load = run(SYSTEMCTL, 'show', '--property=LoadState', '--value', unit)
     if load != 'not-found':
         require(load == 'loaded', 'D4 cleanup unit state unknown')
         run(SYSTEMCTL, 'stop', unit)
-    require(run(SYSTEMCTL, 'show', '--property=ActiveState', '--value', unit) == 'inactive',
-            'D4 cleanup unit remains active')
+    state = run(SYSTEMCTL, 'show', '--property=ActiveState', '--value', unit)
+    if state == 'failed' and allow_exited_failure:
+        # systemd retains the exit result even after a successful stop.
+        fields = run(SYSTEMCTL, 'show', '--property=ActiveState,MainPID,ControlPID,ControlGroup', unit)
+        properties = dict(line.split('=', 1) for line in fields.splitlines())
+        require(properties == {'ActiveState': 'failed', 'MainPID': '0', 'ControlPID': '0', 'ControlGroup': ''},
+                'D4 failed cleanup unit still has runtime state')
+        return True
+    require(state == 'inactive', 'D4 cleanup unit remains active')
+    return False
 
 
 def objects(kind, label, run):
@@ -150,14 +158,20 @@ def reclaim_runtime(runtime, run):
         return
     verify_bundle(runtime.root, runtime.manifest_sha256)
     stop_unit(f'openqms-d4-controller-{runtime.nonce}.service', run)
-    stop_unit(f'openqms-d4-watchdog-{runtime.nonce}.service', run)
+    watchdog = f'openqms-d4-watchdog-{runtime.nonce}.service'
+    watchdog_failed = stop_unit(watchdog, run, allow_exited_failure=True)
     journal = runtime.journal()
+    require(not watchdog_failed or journal is not None, 'D4 failed watchdog has no receiver reclaim record')
     if journal is not None:
         if journal['state'] != 'closed':
             runtime.maintain()
         journal = runtime.wait_reclaimed(time.monotonic() + 4)
         runtime.remove_receiver(journal, runtime.deployment())
     require(not objects('container', owner, run), 'D4 receiver remains after reclaim')
+    if watchdog_failed:
+        run(SYSTEMCTL, 'reset-failed', watchdog)
+        require(run(SYSTEMCTL, 'show', '--property=ActiveState', '--value', watchdog) == 'inactive',
+                'D4 watchdog failure state was not cleared')
     shutil.rmtree(runtime.root)
 
 
