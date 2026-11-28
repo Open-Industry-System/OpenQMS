@@ -1,0 +1,19 @@
+# Reference rendering for a transient unit named openqms-d4-controller-@NONCE@.service.
+# Runtime launch uses systemd-run; this template is not installed system-wide.
+[Unit]
+Description=OpenQMS D4 isolation controller
+BindsTo=openqms-d4-watchdog-@NONCE@.service
+After=openqms-d4-watchdog-@NONCE@.service
+StartLimitBurst=1
+
+[Service]
+Type=exec
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I -S -B @ROOT@/agent_d4_isolation/deploy/runtime_entry.py controller --nonce @NONCE@
+ExecStopPost=/usr/bin/python3 -I -S -B @ROOT@/agent_d4_isolation/deploy/runtime_entry.py stop --nonce @NONCE@
+TimeoutStartSec=30s
+TimeoutStopSec=6s
+Restart=no
+KillMode=control-group
+LimitCORE=0

@@ -1,0 +1,20 @@
+# Reference rendering for a transient unit named openqms-d4-watchdog-@NONCE@.service.
+# Readiness and ongoing liveness belong only to this main process.
+# A 1s lease leaves sd-event timer/manager observation margin inside the 2s contract.
+[Unit]
+Description=OpenQMS D4 isolation watchdog
+StartLimitBurst=1
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=1s
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -I -S -B @ROOT@/agent_d4_isolation/deploy/runtime_entry.py watchdog --nonce @NONCE@
+ExecStopPost=/usr/bin/python3 -I -S -B @ROOT@/agent_d4_isolation/deploy/runtime_entry.py stop --nonce @NONCE@
+TimeoutStartSec=10s
+TimeoutStopSec=6s
+Restart=no
+KillMode=control-group
+LimitCORE=0
