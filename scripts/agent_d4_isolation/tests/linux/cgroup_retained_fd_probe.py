@@ -130,8 +130,8 @@ def main():
         print('cleanup_failed:' + code, flush=True)
     try:
         require(os.geteuid() == 0, 'root_required')
-        require(os.uname().release == '6.17.0-1020-oracle', 'kernel_unreviewed')
         collector = load_collector()
+        require(collector._reviewed_deleted_cgroup_kernel(), 'kernel_unreviewed')
         print('source_sha256=' + SOURCE_SHA256, flush=True)
         run('/usr/bin/systemd-run', '--quiet', '--unit=' + UNIT,
             '--property=Type=exec', '--property=User=root', '--property=Group=root',

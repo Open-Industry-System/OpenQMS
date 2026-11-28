@@ -576,3 +576,27 @@ def test_each_missing_deleted_group_condition_stays_unknown(m, deleted_group, mi
 def test_deleted_group_proof_needs_original_binding_path_verification(deleted_group):
     ref, state = deleted_group
     assert ref.tasks_remaining() is None
+
+
+@pytest.mark.parametrize(('release', 'arch', 'signature', 'allowed'), [
+    ('6.17.0-1020-oracle', 'aarch64', None, True),
+    ('6.8.0-147-generic', 'aarch64', 'Ubuntu 6.8.0-147.147-generic 6.8.12\n', True),
+    ('6.8.0-147-generic', 'aarch64', 'Ubuntu 6.8.0-147.148-generic 6.8.12\n', False),
+    ('6.8.0-147-generic', 'aarch64', None, False),
+    ('6.8.0-147-generic', 'x86_64', 'Ubuntu 6.8.0-147.147-generic 6.8.12\n', False),
+    ('6.8.0-148-generic', 'aarch64', 'Ubuntu 6.8.0-147.147-generic 6.8.12\n', False),
+])
+def test_deleted_cgroup_kernel_is_bound_to_the_reviewed_build(m, monkeypatch, release, arch, signature, allowed):
+    import io
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(m.os, 'uname', lambda: SimpleNamespace(release=release, machine=arch))
+
+    def read(path, *, encoding):
+        assert path == '/proc/version_signature' and encoding == 'ascii'
+        if signature is None:
+            raise FileNotFoundError(path)
+        return io.StringIO(signature)
+
+    monkeypatch.setattr(m, 'open', read, raising=False)
+    assert m._reviewed_deleted_cgroup_kernel() is allowed

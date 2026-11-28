@@ -188,6 +188,19 @@ class _Namespace:
             os.close(fd)
 
 
+def _reviewed_deleted_cgroup_kernel():
+    kernel = os.uname()
+    if kernel.release == '6.17.0-1020-oracle':
+        return True
+    if (kernel.release, kernel.machine) != ('6.8.0-147-generic', 'aarch64'):
+        return False
+    try:
+        with open('/proc/version_signature', encoding='ascii') as stream:
+            return stream.read(128) == 'Ubuntu 6.8.0-147.147-generic 6.8.12\n'
+    except (OSError, UnicodeError):
+        return False
+
+
 class _Cgroup(_Namespace):
     def __init__(self, fd, path):
         super().__init__(fd)
@@ -233,7 +246,7 @@ class _Cgroup(_Namespace):
     def _deleted_empty(self):
         """Empty original object proof, not permission to reopen a saved path.
 
-        Bound and observed on Ubuntu 6.17.0-1020-oracle only. In upstream v6.17,
+        Bound and observed on the reviewed Ubuntu Oracle and Lima builds. In upstream v6.17,
         cgroup_destroy_locked rejects populated/online children, prevents further
         migration/creation, then removes the core files and directory:
         https://github.com/torvalds/linux/blob/v6.17/kernel/cgroup/cgroup.c#L5679-L5720
@@ -243,7 +256,7 @@ class _Cgroup(_Namespace):
         https://github.com/torvalds/linux/blob/v6.17/fs/d_path.c#L268-L275
         """
         try:
-            _require(os.uname().release == '6.17.0-1020-oracle')
+            _require(_reviewed_deleted_cgroup_kernel())
             _require(self._initial_fd_path is not None and self.alive())
             events = os.fstat(self.events_fd)
             _require((events.st_dev, events.st_ino) == self._events_identity)
