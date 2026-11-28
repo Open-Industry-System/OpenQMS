@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 from contextlib import nullcontext
 import io
@@ -336,6 +337,91 @@ def test_release_waits_for_only_the_current_d4_allocation(host, monkeypatch, tmp
     assert called == [lease]
     assert unrelated.is_dir()
     assert run(host, 'tick', eligible=eligible)['pr'] == 46
+
+
+@pytest.mark.parametrize(('blocker', 'reason'), [
+    (None, None),
+    ('MainPID', 'still has runtime state'),
+    ('ControlPID', 'still has runtime state'),
+    ('ControlGroup', 'still has runtime state'),
+    ('missing-journal', 'no receiver reclaim record'),
+    ('doubted-journal', 'receiver_reclaim_unverified'),
+    ('remaining-receiver', 'receiver remains after reclaim'),
+])
+def test_release_checks_failed_watchdog_and_native_reclaim(host, monkeypatch, tmp_path, blocker, reason):
+    monkeypatch.syspath_prepend(str(ROOT / 'deploy' / 'd4-acceptance'))
+    cleanup = importlib.import_module('cleanup')
+    monkeypatch.setattr(remote, 'MODE', tmp_path)
+    monkeypatch.setattr(cleanup, 'QUEUE_ROOT', tmp_path)
+    monkeypatch.setattr(cleanup, 'RUN_ROOT', tmp_path / 'portals')
+    monkeypatch.setattr(cleanup, 'root_private', Mock())
+    monkeypatch.setattr(cleanup, 'trusted_directory', Mock())
+    monkeypatch.setattr(cleanup, 'verify_bundle', Mock())
+    monkeypatch.setattr(cleanup, 'socket_path_for', lambda lease: tmp_path / f'{lease}.sock')
+
+    eligible = [identity(45), identity(46)]
+    slot = run(host, 'tick', eligible=eligible)
+    lease = slot['lease']
+    stage_runtime(host, slot)
+    run(host, 'ready', lease=lease, eligible=eligible)
+    run(host, 'passed', lease=lease, eligible=eligible)
+    allocation = tmp_path / 'd4' / lease
+    allocation.mkdir(parents=True)
+    runtime = cleanup.RuntimeLaunch(tmp_path / 'runtime', 'a' * 64, 'b' * 64, 'c' * 64)
+    runtime.root.mkdir()
+    journal = {'state': 'closed', 'closed_by': 'reclaim_verified', 'doubted': blocker == 'doubted-journal'}
+    runtime.journal = Mock(return_value=None if blocker == 'missing-journal' else journal)
+    runtime.deployment = Mock(return_value='pinned-image')
+    runtime.remove_receiver = Mock()
+    monkeypatch.setattr(cleanup, 'native_runtimes', lambda *_: (runtime,))
+
+    watchdog = f'openqms-d4-watchdog-{runtime.nonce}.service'
+    watchdog_state = {'ActiveState': 'failed', 'MainPID': '0', 'ControlPID': '0', 'ControlGroup': ''}
+    if blocker in ('MainPID', 'ControlPID'):
+        watchdog_state[blocker] = '123'
+    if blocker == 'ControlGroup':
+        watchdog_state[blocker] = f'/system.slice/{watchdog}'
+    resets = []
+
+    def command(executable, action, *args):
+        assert executable == cleanup.SYSTEMCTL
+        unit = args[-1]
+        if action == 'stop':
+            return ''  # systemd can succeed without clearing a failed state.
+        if action == 'reset-failed':
+            assert unit == watchdog
+            runtime.remove_receiver.assert_called_once_with(journal, 'pinned-image')
+            resets.append(unit)
+            watchdog_state['ActiveState'] = 'inactive'
+            return ''
+        assert action == 'show'
+        if args[0] == '--property=LoadState':
+            return 'loaded'
+        if args[0] == '--property=ActiveState':
+            return watchdog_state['ActiveState'] if unit == watchdog else 'inactive'
+        assert unit == watchdog and args[0] == '--property=ActiveState,MainPID,ControlPID,ControlGroup'
+        return '\n'.join(f'{name}={value}' for name, value in watchdog_state.items())
+
+    def objects(kind, label, _run):
+        if label == f'{cleanup.NONCE_LABEL}={runtime.nonce}' and blocker == 'remaining-receiver':
+            return [{'Id': 'd' * 64}]
+        return []
+
+    monkeypatch.setattr(cleanup, 'objects', objects)
+    monkeypatch.setattr(remote, 'cleanup_d4', lambda active: cleanup.cleanup(active, run=command))
+    if reason:
+        with pytest.raises(RuntimeError, match=reason):
+            run(host, 'release', lease=lease)
+        with pytest.raises(ValueError, match='not complete'):
+            run(host, 'released', lease=lease)
+        assert run(host, 'tick', eligible=eligible)['phase'] == 'releasing'
+        assert not resets and runtime.root.is_dir() and allocation.is_dir()
+        return
+
+    run(host, 'release', lease=lease)
+    assert run(host, 'released', lease=lease)['phase'] == 'idle'
+    assert run(host, 'tick', eligible=eligible)['pr'] == 46
+    assert resets == [watchdog] and not runtime.root.exists() and not allocation.exists()
 
 
 @pytest.mark.parametrize('roles', [
